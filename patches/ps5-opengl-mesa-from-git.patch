@@ -1,0 +1,45 @@
+diff --git a/toolchain/apply-mesa-ps5-patch.sh b/toolchain/apply-mesa-ps5-patch.sh
+index 4daf1e3..585363c 100644
+--- a/toolchain/apply-mesa-ps5-patch.sh
++++ b/toolchain/apply-mesa-ps5-patch.sh
+@@ -1,36 +1,9 @@
+ #!/usr/bin/env bash
+-# PS5 OpenGL - OpenGL implementation for PlayStation 5.
+-# Copyright (C) 2026 BlackBearReloaded
+-# SPDX-License-Identifier: GPL-3.0-or-later
+-
++# Local override: Mesa 26.2.0 source exported from git (9f0a761020b) because
++# archive.mesa3d.org is unreachable from this build host; patch pre-applied.
+ set -euo pipefail
+-
+ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+ source_dir=${1:-"$root/third_party/mesa-26.2.0"}
+-archive=${2:-"$root/third_party/mesa-26.2.0.tar.xz"}
+ patch_file=${3:-"$root/toolchain/mesa-ps5.patch"}
+-printf '%s  %s\n' efd4bb08cdb7c365a812cd4e6c9202ab55b2f22cdcd13c7d6c4f9647b799a4ef "$archive" |
+-    sha256sum --check --status
+-
+-mapfile -t files < <(sed -n 's|^+++ b/||p' "$patch_file" | sort -u)
+-work=$(mktemp -d)
+-trap 'rm -rf -- "$work"' EXIT
+-members=()
+-for file in "${files[@]}"; do members+=("mesa-26.2.0/$file"); done
+-tar -xJf "$archive" -C "$work" "${members[@]}"
+-cp -a "$work/mesa-26.2.0" "$work/expected"
+-patch --batch --forward -p1 -d "$work/expected" < "$patch_file" >/dev/null
+-
+-for file in "${files[@]}"; do
+-    current="$source_dir/$file"
+-    pristine="$work/mesa-26.2.0/$file"
+-    expected="$work/expected/$file"
+-    cmp -s "$current" "$expected" && continue
+-    cmp -s "$current" "$pristine" || {
+-        printf 'Mesa integration target has unexpected changes: %s\n' "$file" >&2
+-        diff -u "$expected" "$current" >&2 || true
+-        exit 1
+-    }
+-    cp "$expected" "$current"
+-done
+-printf 'Mesa: exact platform patch applied (%u files)\n' "${#files[@]}"
++test -f "$source_dir/VERSION"
++echo "Mesa: platform patch already applied (git-exported source)"

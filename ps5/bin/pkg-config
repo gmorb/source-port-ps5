@@ -1,0 +1,3 @@
+#!/bin/sh
+# Static-only pkg-config for PS5 (everything is linked into one executable).
+exec /usr/bin/pkg-config --static "$@"

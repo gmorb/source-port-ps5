@@ -1,0 +1,552 @@
+diff --git a/appframework/AppSystemGroup.cpp b/appframework/AppSystemGroup.cpp
+index 196bd80..563f988 100644
+--- a/appframework/AppSystemGroup.cpp
++++ b/appframework/AppSystemGroup.cpp
+@@ -65,7 +65,7 @@ AppModule_t CAppSystemGroup::LoadModule( const char *pDLLName )
+ 	if (!pSysModule)
+ 	{
+ 		Warning("AppFramework : Unable to load module %s!\n", pDLLName );
+-		return APP_MODULE_INVALID;
++		{ printf( "[trace] %s:%d module load failed\n", __FILE__, __LINE__ ); return APP_MODULE_INVALID; }
+ 	}
+ 
+ 	int nIndex = m_Modules.AddToTail();
+@@ -82,7 +82,7 @@ AppModule_t CAppSystemGroup::LoadModule( CreateInterfaceFn factory )
+ 	if (!factory)
+ 	{
+ 		Warning("AppFramework : Unable to load module %p!\n", factory );
+-		return APP_MODULE_INVALID;
++		{ printf( "[trace] %s:%d module load failed\n", __FILE__, __LINE__ ); return APP_MODULE_INVALID; }
+ 	}
+ 
+ 	// See if we already loaded it...
+@@ -220,7 +220,7 @@ bool CAppSystemGroup::AddSystems( AppSystemInfo_t *pSystemList )
+ 		if ( !pSystem )
+ 		{
+ 			Warning( "Unable to load interface %s from %s\n", pSystemList->m_pInterfaceName, pSystemList->m_pModuleName );
+-			return false;
++			{ printf( "[trace] %s:%d failed\n", __FILE__, __LINE__ ); return false; }
+ 		}
+ 		++pSystemList;
+ 	}
+@@ -284,7 +284,7 @@ bool CAppSystemGroup::ConnectSystems()
+ 		if (!sys->Connect( GetFactory() ))
+ 		{
+ 			ReportStartupFailure( CONNECTION, i );
+-			return false;
++			{ printf( "[trace] %s:%d failed\n", __FILE__, __LINE__ ); return false; }
+ 		}
+ 	}
+ 	return true;
+@@ -550,7 +550,7 @@ bool CSteamAppSystemGroup::SetupSearchPaths( const char *pStartingDir, bool bOnl
+ 	steamInfo.m_bSetSteamDLLPath = true;
+ 	steamInfo.m_bSteam = m_pFileSystem->IsSteam();
+ 	if ( FileSystem_SetupSteamEnvironment( steamInfo ) != FS_OK )
+-		return false;
++		{ printf( "[trace] %s:%d failed\n", __FILE__, __LINE__ ); return false; }
+ 
+ 	CFSMountContentInfo fsInfo;
+ 	fsInfo.m_pFileSystem = m_pFileSystem;
+@@ -558,14 +558,14 @@ bool CSteamAppSystemGroup::SetupSearchPaths( const char *pStartingDir, bool bOnl
+ 	fsInfo.m_pDirectoryName = steamInfo.m_GameInfoPath;
+ 
+ 	if ( FileSystem_MountContent( fsInfo ) != FS_OK )
+-		return false;
++		{ printf( "[trace] %s:%d failed\n", __FILE__, __LINE__ ); return false; }
+ 
+ 	// Finally, load the search paths for the "GAME" path.
+ 	CFSSearchPathsInit searchPathsInit;
+ 	searchPathsInit.m_pDirectoryName = steamInfo.m_GameInfoPath;
+ 	searchPathsInit.m_pFileSystem = fsInfo.m_pFileSystem;
+ 	if ( FileSystem_LoadSearchPaths( searchPathsInit ) != FS_OK )
+-		return false;
++		{ printf( "[trace] %s:%d failed\n", __FILE__, __LINE__ ); return false; }
+ 
+ 	FileSystem_AddSearchPath_Platform( fsInfo.m_pFileSystem, steamInfo.m_GameInfoPath );
+ 	Q_strncpy( m_pGameInfoPath, steamInfo.m_GameInfoPath, sizeof(m_pGameInfoPath) );
+diff --git a/appframework/sdlmgr.cpp b/appframework/sdlmgr.cpp
+index 53ca92d..74d9fd6 100644
+--- a/appframework/sdlmgr.cpp
++++ b/appframework/sdlmgr.cpp
+@@ -814,6 +814,12 @@ bool CSDLMgr::CreateHiddenGameWindow( const char *pTitle, int width, int height
+ 	// no window yet? Create one now!
+ 	m_nWindowRefCount = 1;
+ 
++#ifdef PLATFORM_PS5
++	// The PS5 SDL bridge supports exactly one window at the display's native size.
++	width = 1920;
++	height = 1080;
++#endif
++
+ 	int x = SDL_WINDOWPOS_CENTERED;
+ 	int y = SDL_WINDOWPOS_CENTERED;
+ 	int flags = SDL_WINDOW_HIDDEN;
+diff --git a/engine/audio/snd_dev_sdl.cpp b/engine/audio/snd_dev_sdl.cpp
+index 9e03c52..02af6ed 100644
+--- a/engine/audio/snd_dev_sdl.cpp
++++ b/engine/audio/snd_dev_sdl.cpp
+@@ -242,7 +242,12 @@ void CAudioDeviceSDLAudio::OpenWaveOut( void )
+ 	desired.samples = 2048;
+ 	desired.callback = &CAudioDeviceSDLAudio::AudioCallbackEntry;
+ 	desired.userdata = this;
++#ifdef PLATFORM_PS5
++	// sceAudioOut runs at 48 kHz; let SDL resample the engine's 44.1 kHz mix.
++	m_devId = SDL_OpenAudioDevice(NULL, 0, &desired, &obtained, 0);
++#else
+ 	m_devId = SDL_OpenAudioDevice(NULL, 0, &desired, &obtained, SDL_AUDIO_ALLOW_ANY_CHANGE);
++#endif
+ 
+ 	if (!m_devId)
+ 		SDLAUDIO_FAIL("SDL_OpenAudioDevice()");
+diff --git a/engine/net_ws.cpp b/engine/net_ws.cpp
+index 6f3c656..bba33a1 100644
+--- a/engine/net_ws.cpp
++++ b/engine/net_ws.cpp
+@@ -1,3 +1,6 @@
++#ifdef PLATFORM_PS5
++#include <fcntl.h>
++#endif
+ //========= Copyright Valve Corporation, All rights reserved. ============//
+ //
+ // Purpose: 
+@@ -503,6 +506,11 @@ int NET_OpenSocket ( const char *net_interface, int& port, int protocol )
+ 		NET_GetLastError();
+ 		Msg ("WARNING: NET_OpenSocket: ioctl FIONBIO: %s\n", NET_ErrorString(net_error) );
+ 	}
++#ifdef PLATFORM_PS5
++	// FIONBIO is accepted but has no effect on PS5 sockets; without this the
++	// main thread blocks in recvfrom() as soon as the network is polled.
++	fcntl( newsocket, F_SETFL, fcntl( newsocket, F_GETFL, 0 ) | O_NONBLOCK );
++#endif
+ 	
+ 	if ( protocol == IPPROTO_TCP )
+ 	{
+diff --git a/engine/sv_uploadgamestats.cpp b/engine/sv_uploadgamestats.cpp
+index c4a3085..589996a 100644
+--- a/engine/sv_uploadgamestats.cpp
++++ b/engine/sv_uploadgamestats.cpp
+@@ -381,6 +381,11 @@ public:
+ 	virtual void GetPseudoUniqueId( char *buf, size_t bufsize )
+ 	{
+ 		Q_memset( buf, 0, bufsize );
++#ifdef PLATFORM_PS5
++		// No Steam/registry on PS5; stats are never uploaded anyway.
++		Q_snprintf( buf, bufsize, "ps5-%08x", (unsigned)Plat_FloatTime() ^ 0x5a5a1234 );
++		return;
++#endif
+ 
+ #ifndef SWDS
+ 		IRegistry *temp = InstanceRegistry( "Steam" );
+diff --git a/engine/sys_dll.cpp b/engine/sys_dll.cpp
+index 4020131..d1c358b 100644
+--- a/engine/sys_dll.cpp
++++ b/engine/sys_dll.cpp
+@@ -668,7 +668,9 @@ void Sys_InitMemory( void )
+ #elif defined(POSIX)
+ 	uint64_t memsize = ONE_HUNDRED_TWENTY_EIGHT_MB;
+ 
+-#if defined(OSX) || defined(PLATFORM_BSD)
++#if defined(PLATFORM_PS5)
++	memsize = 4ull * 1024 * 1024 * 1024; // what a homebrew title can use comfortably
++#elif defined(OSX) || defined(PLATFORM_BSD)
+ 	int mib[2] = { CTL_HW, HW_MEMSIZE };
+ 	u_int namelen = sizeof(mib) / sizeof(mib[0]);
+ 	size_t len = sizeof(memsize);
+diff --git a/inputsystem/joystick_sdl.cpp b/inputsystem/joystick_sdl.cpp
+index aef5c48..5d53a9c 100644
+--- a/inputsystem/joystick_sdl.cpp
++++ b/inputsystem/joystick_sdl.cpp
+@@ -5,6 +5,12 @@
+ //===========================================================================//
+ 
+ /* For force feedback testing. */
++#ifdef PLATFORM_PS5
++// The PS5 SDL build has controllers but no haptic subsystem.
++#define ZMR_SDL_JOY_FLAGS SDL_INIT_GAMECONTROLLER
++#else
++#define ZMR_SDL_JOY_FLAGS ( SDL_INIT_GAMECONTROLLER | SDL_INIT_HAPTIC )
++#endif
+ #include "inputsystem.h"
+ #include "tier1/convar.h"
+ #include "tier0/icommandline.h"
+@@ -185,7 +191,7 @@ void CInputSystem::InitializeJoysticks( void )
+ 		SDL_SetHint(SDL_HINT_GAMECONTROLLERCONFIG, controllerConfig);
+ 	}
+ 
+-	if ( SDL_InitSubSystem( SDL_INIT_GAMECONTROLLER | SDL_INIT_HAPTIC ) == -1 )
++	if ( SDL_InitSubSystem( ZMR_SDL_JOY_FLAGS ) == -1 )
+ 	{
+ 		Warning("Joystick init failed -- SDL_Init(SDL_INIT_GAMECONTROLLER|SDL_INIT_HAPTIC) failed: %s.\n", SDL_GetError());
+ 		return;
+@@ -230,7 +236,7 @@ void CInputSystem::ShutdownJoysticks()
+ 	{
+ 		JoystickHotplugRemoved( m_pJoystickInfo[ 0 ].m_nDeviceId );
+ 	}
+-	SDL_QuitSubSystem( SDL_INIT_GAMECONTROLLER | SDL_INIT_HAPTIC );
++	SDL_QuitSubSystem( ZMR_SDL_JOY_FLAGS );
+ 
+ 	m_bJoystickInitialized = false;
+ }
+diff --git a/launcher/launcher.cpp b/launcher/launcher.cpp
+index 0b27da7..fe9f517 100644
+--- a/launcher/launcher.cpp
++++ b/launcher/launcher.cpp
+@@ -244,6 +244,12 @@ bool GetExecutableName( char *out, int outSize )
+ 		return false;
+ 	}
+ 	return true;
++#elif defined( PLATFORM_PS5 )
++	// PS5: the engine always runs from its (overlay) base directory.
++	if ( !getcwd( out, outSize ) )
++		return false;
++	Q_strncat( out, "/", outSize, COPY_ALL_CHARACTERS );
++	return true;
+ #else
+ 	return false;
+ #endif
+@@ -281,7 +287,7 @@ void UTIL_ComputeBaseDir()
+ 	if ( !g_szBasedir[0] && GetExecutableName( g_szBasedir, sizeof( g_szBasedir ) ) )
+ 	{
+ 		char *pBuffer = strrchr( g_szBasedir, '\\' );
+-		if ( *pBuffer )
++		if ( pBuffer && *pBuffer )
+ 		{
+ 			*(pBuffer+1) = '\0';
+ 		}
+@@ -690,7 +696,7 @@ bool CSourceAppSystemGroup::Create()
+ #endif
+ 
+ 	if ( !AddSystems( appSystems ) ) 
+-		return false;
++		{ printf( "[trace] %s:%d failed\n", __FILE__, __LINE__ ); return false; }
+ 	
+ 	// This will be NULL for games that don't support VR. That's ok. Just don't load the DLL
+ 	AppModule_t sourceVRModule = LoadModule( "sourcevr" DLL_EXT_STRING );
+@@ -704,7 +710,7 @@ bool CSourceAppSystemGroup::Create()
+ 	char pFileSystemDLL[MAX_PATH];
+ 	bool bSteam;
+ 	if ( FileSystem_GetFileSystemDLLName( pFileSystemDLL, MAX_PATH, bSteam ) != FS_OK )
+-		return false;
++		{ printf( "[trace] %s:%d failed\n", __FILE__, __LINE__ ); return false; }
+ 
+ 	AppModule_t fileSystemModule = LoadModule( pFileSystemDLL );
+ 	AddSystem( fileSystemModule, QUEUEDLOADER_INTERFACE_VERSION );
+@@ -719,20 +725,20 @@ bool CSourceAppSystemGroup::Create()
+ 		// If we are running with -steam then that means the tools are being used by an SDK user. Don't exit in this case!
+ 		if ( !p4 && !CommandLine()->FindParm( "-steam" ) )
+ 		{
+-			return false;
++			{ printf( "[trace] %s:%d failed\n", __FILE__, __LINE__ ); return false; }
+ 		}
+ #endif // STAGING_ONLY
+ 
+ 		AppModule_t vstdlibModule = LoadModule( "vstdlib" DLL_EXT_STRING );
+ 		IProcessUtils *processUtils = ( IProcessUtils* )AddSystem( vstdlibModule, PROCESS_UTILS_INTERFACE_VERSION );
+ 		if ( !processUtils )
+-			return false;
++			{ printf( "[trace] %s:%d failed\n", __FILE__, __LINE__ ); return false; }
+ 	}
+ 
+ 	// Connect to iterfaces loaded in AddSystems that we need locally
+ 	IMaterialSystem *pMaterialSystem = (IMaterialSystem*)FindSystem( MATERIAL_SYSTEM_INTERFACE_VERSION );
+ 	if ( !pMaterialSystem )
+-		return false;
++		{ printf( "[trace] %s:%d failed\n", __FILE__, __LINE__ ); return false; }
+ 
+ 	g_pEngineAPI = (IEngineAPI*)FindSystem( VENGINE_LAUNCHER_API_VERSION );
+ 
+@@ -744,7 +750,7 @@ bool CSourceAppSystemGroup::Create()
+ 		g_pHammer = (IHammer*)AddSystem( hammerModule, INTERFACEVERSION_HAMMER );
+ 		if ( !g_pHammer )
+ 		{
+-			return false;
++			{ printf( "[trace] %s:%d failed\n", __FILE__, __LINE__ ); return false; }
+ 		}
+ 	}
+ #endif // defined( _WIN32 ) && defined( STAGING_ONLY )
+@@ -779,7 +785,7 @@ bool CSourceAppSystemGroup::PreInit()
+ 	ConnectTier3Libraries( &factory, 1 );
+ 
+ 	if ( !g_pFullFileSystem || !g_pMaterialSystem )
+-		return false;
++		{ printf( "[trace] %s:%d failed\n", __FILE__, __LINE__ ); return false; }
+ 
+ 	CFSSteamSetupInfo steamInfo;
+ 	steamInfo.m_bToolsMode = false;
+@@ -796,14 +802,14 @@ bool CSourceAppSystemGroup::PreInit()
+ 		}
+ 	}
+ 	if ( FileSystem_SetupSteamEnvironment( steamInfo ) != FS_OK )
+-		return false;
++		{ printf( "[trace] %s:%d failed\n", __FILE__, __LINE__ ); return false; }
+ 
+ 	CFSMountContentInfo fsInfo;
+ 	fsInfo.m_pFileSystem = g_pFullFileSystem;
+ 	fsInfo.m_bToolsMode = m_bEditMode;
+ 	fsInfo.m_pDirectoryName = steamInfo.m_GameInfoPath;
+ 	if ( FileSystem_MountContent( fsInfo ) != FS_OK )
+-		return false;
++		{ printf( "[trace] %s:%d failed\n", __FILE__, __LINE__ ); return false; }
+ 
+ 	if ( IsPC() || !IsX360() )
+ 	{
+@@ -952,8 +958,8 @@ bool GrabSourceMutex()
+ 	CRC32_ProcessBuffer( &gameCRC, (void *)pchGameParam, Q_strlen( pchGameParam ) );
+ 	CRC32_Final( &gameCRC );
+ 
+-#ifdef ANDROID
+-	return true;
++#if defined( ANDROID ) || defined( PLATFORM_PS5 )
++	return true; // single-app console, no lock file needed
+ #elif defined (LINUX) || defined(PLATFORM_BSD)
+ 	/*
+ 	 * Linux
+diff --git a/materialsystem/cmaterialsystem.cpp b/materialsystem/cmaterialsystem.cpp
+index e787071..2c46668 100644
+--- a/materialsystem/cmaterialsystem.cpp
++++ b/materialsystem/cmaterialsystem.cpp
+@@ -3651,6 +3651,10 @@ void CMaterialSystem::EndFrame( void )
+ 	//-------------------------------------------------------------
+ 
+ 	int iConVarThreadMode = mat_queue_mode.GetInt();
++#ifdef PLATFORM_PS5
++	// The PS5 SDL/EGL bridge binds the GL context to the video thread only.
++	iConVarThreadMode = MATERIAL_SINGLE_THREADED;
++#endif
+ 
+ 	// For this testing release, -2 is equivalent to 0 (off). When we release, we'll make -2 equivalent to -1 (on)
+ 	if ( iConVarThreadMode == -2 )
+diff --git a/public/filesystem_init.cpp b/public/filesystem_init.cpp
+index d309efc..ea66dfb 100644
+--- a/public/filesystem_init.cpp
++++ b/public/filesystem_init.cpp
+@@ -759,6 +759,9 @@ bool DoesFileExistIn( const char *pDirectoryName, const char *pFilename )
+ 	Q_strncat( filename, pFilename, sizeof( filename ), COPY_ALL_CHARACTERS );
+ 	Q_FixSlashes( filename );
+ 	bool bExist = ( _access( filename, 0 ) == 0 );
++#ifdef PLATFORM_PS5
++	printf( "[fs] exists? %s -> %d\n", filename, (int)bExist );
++#endif
+ 
+ 	return ( bExist );
+ }
+diff --git a/public/togl/linuxwin/glmgr.h b/public/togl/linuxwin/glmgr.h
+index a81ca03..0260cc0 100644
+--- a/public/togl/linuxwin/glmgr.h
++++ b/public/togl/linuxwin/glmgr.h
+@@ -1915,7 +1915,7 @@ class GLMContext
+ 
+ FORCEINLINE void GLMContext::DrawRangeElements(	GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const GLvoid *indices, uint baseVertex, CGLMBuffer *pIndexBuf )
+ {
+-#if GL_ENABLE_INDEX_VERIFICATION
++#if GL_ENABLE_INDEX_VERIFICATION || defined( PLATFORM_PS5 )
+ 	DrawRangeElementsNonInline( mode, start, end, count, type, indices, baseVertex, pIndexBuf );
+ #else
+ 
+diff --git a/tier1/interface.cpp b/tier1/interface.cpp
+index 47fda8f..9836f55 100644
+--- a/tier1/interface.cpp
++++ b/tier1/interface.cpp
+@@ -316,6 +316,11 @@ bool foundLibraryWithPrefix( char *pModuleAbsolutePath, size_t AbsolutePathSize,
+ //-----------------------------------------------------------------------------
+ CSysModule *Sys_LoadModule( const char *pModuleName, Sys_Flags flags /* = SYS_NOFLAGS (0) */ )
+ {
++#ifdef PLATFORM_PS5
++	// PS5: every module is statically linked into the executable; the dlopen
++	// shim (ps5/runtime/ps5_dl.cpp) resolves module names to built-in tables.
++	return reinterpret_cast<CSysModule *>( Sys_LoadLibrary( pModuleName, flags ) );
++#endif
+ 	// If using the Steam filesystem, either the DLL must be a minimum footprint
+ 	// file in the depot (MFP) or a filesystem GetLocalCopy() call must be made
+ 	// prior to the call to this routine.
+diff --git a/togl/linuxwin/glentrypoints.cpp b/togl/linuxwin/glentrypoints.cpp
+index 621ab39..a231fb6 100644
+--- a/togl/linuxwin/glentrypoints.cpp
++++ b/togl/linuxwin/glentrypoints.cpp
+@@ -43,7 +43,7 @@
+ #include "tier1.h"
+ #include "tier2/tier2.h"
+ 
+-#if (defined(_LINUX) || defined(PLATFORM_BSD)) && !defined(__ANDROID__)
++#if (defined(_LINUX) || defined(PLATFORM_BSD)) && !defined(__ANDROID__) && !defined(PLATFORM_PS5)
+ #include <GL/glx.h>
+ #endif
+ 
+@@ -296,7 +296,7 @@ static bool CheckOpenGLExtension_internal(const char *ext, const int coremajor,
+ 				return false;
+ 			}
+ 		}
+-#elif !defined ( OSX ) && !defined( __ANDROID__ )
++#elif !defined ( OSX ) && !defined( __ANDROID__ ) && !defined( PLATFORM_PS5 )
+ 		if (!ptr)
+ 		{
+ 			static CDynamicFunctionOpenGL< true, Display *( APIENTRY *)( ), Display* > glXGetCurrentDisplay("glXGetCurrentDisplay");
+@@ -454,6 +454,11 @@ COpenGLEntryPoints::COpenGLEntryPoints()
+ 	// Getting reports of black screens, etc. with ARB_buffer_storage and AMD drivers. This type of thing:
+ 	//  http://forums.steampowered.com/forums/showthread.php?t=3266806
+ 	// So disable it for now.
++	#ifdef PLATFORM_PS5
++	// PS5 Mesa: persistent/coherent mapped buffers are not GPU-visible (black frames).
++	if ( !CommandLine()->CheckParm( "-gl_enable_arb_buffer_storage" ) )
++		m_bHave_GL_ARB_buffer_storage = false;
++#endif
+ 	if ( ( m_nDriverProvider == cGLDriverProviderAMD ) || CommandLine()->CheckParm( "-gl_disable_arb_buffer_storage" ) )
+ 	{
+ 		m_bHave_GL_ARB_buffer_storage = false;
+diff --git a/togl/linuxwin/glmgr.cpp b/togl/linuxwin/glmgr.cpp
+index 745862b..6266e26 100644
+--- a/togl/linuxwin/glmgr.cpp
++++ b/togl/linuxwin/glmgr.cpp
+@@ -28,6 +28,10 @@
+ #include "togl/rendermechanism.h"
+ 
+ #include "tier0/icommandline.h"
++#ifdef PLATFORM_PS5
++extern "C" void ps5_draw_pre( GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const void *indices, GLint baseVertex );
++extern "C" void ps5_draw_post( void );
++#endif
+ 
+ #include "tier0/vprof.h"
+ #include "glmtexinlines.h"
+@@ -5184,7 +5188,13 @@ void GLMContext::DrawRangeElementsNonInline( GLenum mode, GLuint start, GLuint e
+ 
+ 	if ( m_pBoundPair )
+ 	{
++#ifdef PLATFORM_PS5
++		ps5_draw_pre( mode, start, end, count, type, indicesActual, baseVertex );
++#endif
+ 		gGL->glDrawRangeElementsBaseVertex( mode, start, end, count, type, indicesActual, baseVertex );
++#ifdef PLATFORM_PS5
++		ps5_draw_post();
++#endif
+ 
+ #if GLMDEBUG
+ 		if ( m_slowCheckEnable )
+diff --git a/togl/linuxwin/glmgr_flush.inl b/togl/linuxwin/glmgr_flush.inl
+index 7532594..1ef8f03 100644
+--- a/togl/linuxwin/glmgr_flush.inl
++++ b/togl/linuxwin/glmgr_flush.inl
+@@ -513,11 +513,37 @@ FORCEINLINE void GLMContext::FlushDrawStates( uint nStartIndex, uint nEndIndex,
+ 		IDirect3DVertexDeclaration9	*pVertDecl = m_pDevice->m_pVertDecl;
+ 		const uint8	*pVertexAttribDescToStreamIndex = pVertDecl->m_VertexAttribDescToStreamIndex;
+ 
++#ifdef PLATFORM_PS5
++		static int s_ps5AttrLogs = 0;
++		const bool bPS5Log = s_ps5AttrLogs < 40;
++		if ( bPS5Log )
++		{
++			++s_ps5AttrLogs;
++			printf( "[toglattr] decl=%p elems=%d maxattrs=%d map=", pVertDecl, pVertDecl->m_elemCount, nMaxVertexAttributesToCheck );
++			for ( int i = 0; i < 16; ++i ) printf( "%02x ", pVertexShaderAttribMap[i] );
++			printf( "\n" );
++			for ( int e = 0; e < (int)pVertDecl->m_elemCount; ++e )
++			{
++				const D3DVERTEXELEMENT9_GL &el = pVertDecl->m_elements[e];
++				printf( "[toglattr]   elem%d stream=%d off=%d type=%d usage=%d idx=%d -> gl comps=0x%x type=0x%x norm=%d\n", e,
++					el.m_dxdecl.Stream, el.m_dxdecl.Offset, el.m_dxdecl.Type, el.m_dxdecl.Usage, el.m_dxdecl.UsageIndex,
++					el.m_gldecl.m_nCompCount, el.m_gldecl.m_datatype, el.m_gldecl.m_normalized );
++			}
++		}
++#endif
+ 		for( int nMask = 1, nIndex = 0; nIndex < nMaxVertexAttributesToCheck; ++nIndex, nMask <<= 1 )
+ 		{
+ 			uint8 vertexShaderAttrib = pVertexShaderAttribMap[ nIndex ];
+ 
+ 			uint nDeclIndex = pVertexAttribDescToStreamIndex[vertexShaderAttrib];
++#ifdef PLATFORM_PS5
++			if ( bPS5Log )
++			{
++				int st = nDeclIndex != 0xFF ? pVertDecl->m_elements[nDeclIndex].m_dxdecl.Stream : -1;
++				printf( "[toglattr]   slot%d attrib=%02x decl=%d stream=%d dummy=%d stride=%d\n", nIndex, vertexShaderAttrib, nDeclIndex == 0xFF ? -1 : (int)nDeclIndex,
++					st, st >= 0 ? ( m_pDevice->m_vtx_buffers[st] == m_pDevice->m_pDummy_vtx_buffer ) : -1, st >= 0 ? (int)m_pDevice->m_streams[st].m_stride : -1 );
++			}
++#endif
+ 			if ( nDeclIndex == 0xFF )
+ 			{
+ 				// Not good - the vertex shader has an attribute which can't be located in the decl! 
+diff --git a/vgui2/vgui_surfacelib/linuxfont.cpp b/vgui2/vgui_surfacelib/linuxfont.cpp
+index 0470371..8db5d4a 100644
+--- a/vgui2/vgui_surfacelib/linuxfont.cpp
++++ b/vgui2/vgui_surfacelib/linuxfont.cpp
+@@ -18,6 +18,12 @@
+ #include <malloc.h>
+ #endif
+ #include <tier0/dbg.h>
++#ifdef PLATFORM_PS5
++// fontconfig needs a system font setup the PS5 does not have.
++#undef HAVE_FC
++#define HAVE_FC 0
++#include <sys/stat.h>
++#endif
+ #include <vgui/ISurface.h>
+ #include <utlbuffer.h>
+ #if HAVE_FC
+@@ -462,6 +468,18 @@ char *TryFindFont(const char *winFontName, bool bBold, int italic)
+ 		snprintf(fontFile, sizeof fontFile, "%s/files/%s.ttf", getenv("APP_DATA_PATH"), fontName);
+ 
+ 
++	return fontFile;
++#elif defined( PLATFORM_PS5 )
++	// Prefer Valve's Linux fonts if the game's platform/ folder has them,
++	// otherwise use the fonts bundled with the app (Droid Sans / Cousine).
++	const bool bMono = !strcmp( winFontName, "Courier New" ) || !strcmp( winFontName, "Lucida Console" );
++	const char *valveName = bMono ? "liberationmono-regular" :
++		( bBold ? ( italic ? "dejavusans-boldoblique" : "dejavusans-bold" ) : ( italic ? "dejavusans-oblique" : "dejavusans" ) );
++	struct stat st;
++	snprintf( fontFile, sizeof fontFile, "platform/resource/linux_fonts/%s.ttf", valveName );
++	if ( stat( fontFile, &st ) == 0 )
++		return fontFile;
++	snprintf( fontFile, sizeof fontFile, "/app0/assets/fonts/%s", bMono ? "Cousine-Regular.ttf" : "DroidSans.ttf" );
+ 	return fontFile;
+ #else
+ 	bool bRegularPostfix = false;
+diff --git a/wscript b/wscript
+index 16f2263..c6786ca 100644
+--- a/wscript
++++ b/wscript
+@@ -258,6 +258,16 @@ def define_platform(conf):
+ 			'_DLL_EXT=.dylib'
+ 		])
+ 
++	elif conf.options.PS5:
++		conf.env.PS5 = 1
++		conf.env.append_unique('DEFINES', [
++			'POSIX=1', '_POSIX=1', 'PLATFORM_POSIX=1',
++			'GNUC',
++			'PLATFORM_BSD=1',
++			'PLATFORM_PS5=1',
++			'NO_HOOK_MALLOC',
++			'_DLL_EXT=.so'
++		])
+ 	elif conf.env.DEST_OS in ['freebsd', 'openbsd', 'netbsd', 'dragonflybsd']: # Tested only in freebsd
+ 		conf.env.append_unique('DEFINES', [
+ 			'POSIX=1', '_POSIX=1', 'PLATFORM_POSIX=1',
+@@ -319,6 +329,9 @@ def options(opt):
+ 	grp.add_option('--enable-opus', action = 'store_true', dest = 'OPUS', default = False,
+ 		help = 'build engine with Opus voice codec [default: %default]')
+ 
++	grp.add_option('--ps5', action = 'store_true', dest = 'PS5', default = False,
++		help = 'cross-compile for jailbroken PlayStation 5 (prospero-clang) [default: %default]')
++
+ 	grp.add_option('--sanitize', action = 'store', dest = 'SANITIZE', default = '',
+ 		help = 'build with sanitizers [default: %default]')
+ 
+@@ -518,6 +531,9 @@ def configure(conf):
+ 		]
+ 
+ 		flags += ['-funwind-tables', '-g']
++	elif conf.options.PS5:
++		pacbrew = os.environ['PACBREW']
++		flags += ['-march=znver2', '-I'+os.environ['PS5_COMPAT_INCLUDE'], '-I'+pacbrew+'/include', '-L'+pacbrew+'/lib']
+ 	elif conf.env.COMPILER_CC != 'msvc' and conf.env.DEST_OS != 'darwin' and conf.env.DEST_CPU in ['x86', 'x86_64']:
+ 		flags += ['-march=core2']
+ 
+@@ -529,7 +545,7 @@ def configure(conf):
+ 	if conf.env.DEST_CPU == 'arm':
+ 		flags += ['-march=armv7-a', '-mfpu=neon-vfpv4']
+ 
+-	if conf.env.DEST_OS == 'freebsd':
++	if conf.env.DEST_OS == 'freebsd' and not conf.options.PS5:
+ 		linkflags += ['-lexecinfo']
+ 
+ 	if conf.env.DEST_OS != 'win32':

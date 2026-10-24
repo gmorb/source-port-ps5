@@ -1,0 +1,258 @@
+diff --git a/integration/SDL2/CMakeLists.txt b/integration/SDL2/CMakeLists.txt
+index d12228b..ad9e403 100644
+--- a/integration/SDL2/CMakeLists.txt
++++ b/integration/SDL2/CMakeLists.txt
+@@ -18,10 +18,18 @@ set(SDL_HIDAPI_JOYSTICK OFF CACHE BOOL "" FORCE)
+ set(SDL_PTHREADS ON CACHE BOOL "" FORCE)
+ set(SDL_SOURCE_VERSION "2.30.12-g8c56053f13ca-g26")
+ set(SDL2_DISABLE_SDL2MAIN ON CACHE BOOL "" FORCE)
+-foreach(feature AUDIO RENDER HAPTIC SENSOR OPENGL OPENGLES VULKAN X11
++foreach(feature RENDER HAPTIC SENSOR OPENGL OPENGLES VULKAN X11
+                 WAYLAND KMSDRM OFFSCREEN JACK PULSEAUDIO DBUS IBUS FCITX LIBUDEV)
+     set(SDL_${feature} OFF CACHE BOOL "" FORCE)
+ endforeach()
++# zmr: keep SDL's audio core and the PS5 sceAudioOut backend only.
++set(SDL_AUDIO ON CACHE BOOL "" FORCE)
++set(SDL_DISKAUDIO OFF CACHE BOOL "" FORCE)
++set(SDL_DUMMYAUDIO OFF CACHE BOOL "" FORCE)
++set(SDL_LIBSAMPLERATE OFF CACHE BOOL "" FORCE)
++foreach(feature ALSA OSS ESD ARTS NAS SNDIO PIPEWIRE)
++    set(SDL_${feature} OFF CACHE BOOL "" FORCE)
++endforeach()
+ if(G19_HOST_TEST)
+     add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -g)
+     add_link_options(-fsanitize=address,undefined)
+diff --git a/src/gallium/ps5/ps5_screen.c b/src/gallium/ps5/ps5_screen.c
+index 2f6a1b6..2c64b28 100644
+--- a/src/gallium/ps5/ps5_screen.c
++++ b/src/gallium/ps5/ps5_screen.c
+@@ -7774,12 +7774,52 @@ ps5_replicate_depth_stencil_msaa4(struct pipe_context *context,
+           info->dst.box.width, info->dst.box.height, info->mask);
+ }
+ 
++static bool zmr_blit_log_once(unsigned line, const struct pipe_blit_info *info)
++{
++   /* One line per distinct (reason, formats, sizes, binds, mip count). */
++   static uint64_t seen[96];
++   static unsigned nseen;
++   if (!info || !info->src.resource || !info->dst.resource)
++      return false;
++   uint64_t key = (uint64_t)line * 1000003u ^ (uint64_t)info->src.format << 8 ^ (uint64_t)info->dst.format << 20 ^
++                  (uint64_t)info->src.resource->width0 << 32 ^ (uint64_t)info->dst.resource->width0 << 44 ^
++                  (uint64_t)info->src.resource->bind << 3 ^ (uint64_t)info->dst.resource->bind << 13 ^
++                  (uint64_t)info->dst.resource->last_level << 56 ^ (uint64_t)info->src.resource->last_level << 60;
++   for (unsigned i = 0; i < nseen; ++i)
++      if (seen[i] == key)
++         return false;
++   if (nseen >= 96)
++      return false;
++   seen[nseen++] = key;
++   return true;
++}
++#define ZMR_REJECT() do { \
++   if (zmr_blit_log_once(__LINE__, info)) \
++      printf("[ps5-gallium] zmr gpu-blit reject line %d src=%s %ux%u bind=%#x last=%u samples=%u dst=%s %ux%u bind=%#x last=%u samples=%u " \
++             "srcbox=%d,%d %dx%d dstbox=%d,%d %dx%d mask=%#x filter=%u scissor=%d alpha_blend=%d\n", __LINE__, \
++             util_format_short_name(info->src.format), info->src.resource->width0, info->src.resource->height0, \
++             info->src.resource->bind, info->src.resource->last_level, info->src.resource->nr_samples, \
++             util_format_short_name(info->dst.format), info->dst.resource->width0, info->dst.resource->height0, \
++             info->dst.resource->bind, info->dst.resource->last_level, info->dst.resource->nr_samples, \
++             info->src.box.x, info->src.box.y, info->src.box.width, info->src.box.height, \
++             info->dst.box.x, info->dst.box.y, info->dst.box.width, info->dst.box.height, \
++             info->mask, info->filter, info->scissor_enable, info->alpha_blend); \
++   return false; } while (0)
+ static bool
+ ps5_blit_gpu_color(struct ps5_context *context, const struct pipe_blit_info *info)
+ {
+    /* ponytail: plain-color copies using existing sampler layouts and
+     * directly renderable views. Keep the measured floor and other fallbacks. */
+-   if (!PS5_ENABLE_RENDER_TO_TEXTURE_CANDIDATE || !PS5_ENABLE_MRT_CANDIDATE ||
++   /* zmr: the GPU colour blit only needs a single render target, so it does
++    * not depend on the MRT candidate; PS5_GPU_BLIT=0 restores the old gate. */
++   static int zmr_gpu_blit = -1;
++   if (zmr_gpu_blit < 0) {
++      const char *e = getenv("PS5_GPU_BLIT");
++      zmr_gpu_blit = !(e && e[0] == '0');
++      printf("[ps5-gallium] zmr gpu blit %s\n", zmr_gpu_blit ? "enabled" : "disabled");
++   }
++   if (!PS5_ENABLE_RENDER_TO_TEXTURE_CANDIDATE ||
++       (!PS5_ENABLE_MRT_CANDIDATE && !zmr_gpu_blit) ||
+        !PS5_ENABLE_UBO_CANDIDATE || !context || !info ||
+        !info->src.resource || !info->dst.resource ||
+        info->mask != PIPE_MASK_RGBA ||
+@@ -7790,7 +7830,7 @@ ps5_blit_gpu_color(struct ps5_context *context, const struct pipe_blit_info *inf
+        !info->src.box.width || !info->src.box.height ||
+        info->src.box.width == INT_MIN || info->src.box.height == INT_MIN ||
+        info->dst.box.width <= 0 || info->dst.box.height <= 0)
+-      return false;
++      ZMR_REJECT();
+ 
+    int64_t left = info->dst.box.x, bottom = info->dst.box.y;
+    int64_t right = left + info->dst.box.width, top = bottom + info->dst.box.height;
+@@ -7810,7 +7850,7 @@ ps5_blit_gpu_color(struct ps5_context *context, const struct pipe_blit_info *inf
+    if (right <= left || top <= bottom ||
+        (!dst_clipped &&
+         (uint64_t)(right - left) * (top - bottom) < PS5_GPU_BLIT_MIN_PIXELS))
+-      return false;
++      ZMR_REJECT();
+ 
+    const bool resolve = info->src.resource->nr_samples == 4 &&
+                         info->src.resource->nr_storage_samples == 4;
+@@ -7818,7 +7858,7 @@ ps5_blit_gpu_color(struct ps5_context *context, const struct pipe_blit_info *inf
+    if (resolve && (!PS5_ENABLE_MSAA4_CANDIDATE ||
+                    abs(info->src.box.width) != info->dst.box.width ||
+                    abs(info->src.box.height) != info->dst.box.height))
+-      return false;
++      ZMR_REJECT();
+ 
+    const struct ps5_resource *resources[] = {
+       (const struct ps5_resource *)info->src.resource,
+@@ -7828,13 +7868,32 @@ ps5_blit_gpu_color(struct ps5_context *context, const struct pipe_blit_info *inf
+    const unsigned levels[] = {info->src.level, info->dst.level};
+    uintptr_t addresses[2];
+    size_t spans[2];
+-   if (info->src.format != info->dst.format ||
++   static int zmr_gpu_present = -1;
++   if (zmr_gpu_present < 0) {
++      const char *e = getenv("PS5_GPU_PRESENT_BLIT");
++      zmr_gpu_present = zmr_gpu_blit && !(e && e[0] == '0');
++      printf("[ps5-gallium] zmr gpu present blit %s\n", zmr_gpu_present ? "enabled" : "disabled");
++   }
++   /* zmr: the frame present copies the sRGB back buffer into the BGRA
++    * window surface; the blitter converts between the two formats. */
++   const bool zmr_present = zmr_gpu_present &&
++      (info->src.format == PIPE_FORMAT_R8G8B8A8_SRGB || info->src.format == PIPE_FORMAT_R8G8B8A8_UNORM ||
++       info->src.format == PIPE_FORMAT_B8G8R8A8_SRGB || info->src.format == PIPE_FORMAT_B8G8R8A8_UNORM) &&
++      (info->dst.format == PIPE_FORMAT_B8G8R8A8_UNORM || info->dst.format == PIPE_FORMAT_R8G8B8A8_UNORM ||
++       info->dst.format == PIPE_FORMAT_B8G8R8A8_SRGB || info->dst.format == PIPE_FORMAT_R8G8B8A8_SRGB) &&
++      !resolve;
++   if ((info->src.format != info->dst.format && !zmr_present) ||
+        (info->src.format != PIPE_FORMAT_R8G8B8A8_UNORM &&
++        !(zmr_gpu_blit && (info->src.format == PIPE_FORMAT_R8G8B8A8_SRGB ||
++                           info->src.format == PIPE_FORMAT_B8G8R8A8_UNORM ||
++                           info->src.format == PIPE_FORMAT_B8G8R8A8_SRGB ||
++                           info->src.format == PIPE_FORMAT_R8G8B8X8_UNORM ||
++                           info->src.format == PIPE_FORMAT_B8G8R8X8_UNORM)) &&
+         info->src.format != PIPE_FORMAT_R8_UNORM &&
+         info->src.format != PIPE_FORMAT_R8G8_UNORM &&
+         info->src.format != PIPE_FORMAT_R16G16B16A16_FLOAT) ||
+        (resolve && info->src.format != PIPE_FORMAT_R8G8B8A8_UNORM))
+-      return false;
++      ZMR_REJECT();
+    for (unsigned i = 0; i < 2; ++i) {
+       const struct ps5_resource *r = resources[i];
+       const struct pipe_box *b = boxes[i];
+@@ -7845,9 +7904,11 @@ ps5_blit_gpu_color(struct ps5_context *context, const struct pipe_blit_info *inf
+           r->base.last_level >= 16 ||
+           ((!resolve || i) &&
+            (r->base.nr_samples > 1 || r->base.nr_storage_samples > 1)) ||
+-          r->base.format != info->src.format ||
++          (r->base.format != ( i ? info->dst.format : info->src.format ) &&
++           !(zmr_gpu_blit &&
++             util_format_linear(r->base.format) == util_format_linear(i ? info->dst.format : info->src.format))) ||
+           !(r->base.bind & PIPE_BIND_RENDER_TARGET) ||
+-          (r->base.bind & PIPE_BIND_DISPLAY_TARGET) ||
++          ((r->base.bind & PIPE_BIND_DISPLAY_TARGET) && !(zmr_present && i == 1)) ||
+           r->depth_staging_size ||
+           !r->data || !r->allocation_size ||
+           r->allocation_size > UINTPTR_MAX - (uintptr_t)r->data ||
+@@ -7855,7 +7916,7 @@ ps5_blit_gpu_color(struct ps5_context *context, const struct pipe_blit_info *inf
+           r->base.width0 > PS5_MAX_COLOR_WIDTH || r->base.height0 > PS5_MAX_COLOR_HEIGHT ||
+           (i == 0 && (b->x < 0 || b->y < 0)) || b->z < 0 ||
+           (unsigned)b->z >= r->base.array_size || b->depth != 1)
+-         return false;
++         ZMR_REJECT();
+       unsigned width = MAX2(r->base.width0 >> levels[i], 1u);
+       unsigned height = MAX2(r->base.height0 >> levels[i], 1u);
+       /* The destination may extend past the surface (GL clips it with a
+@@ -7864,14 +7925,14 @@ ps5_blit_gpu_color(struct ps5_context *context, const struct pipe_blit_info *inf
+           ((unsigned)b->x > width || (unsigned)b->y > height ||
+            (int64_t)b->x + b->width < 0 || (int64_t)b->y + b->height < 0 ||
+            (int64_t)b->x + b->width > width || (int64_t)b->y + b->height > height))
+-         return false;
++         ZMR_REJECT();
+       if (i == 1) {
+          left = MAX2(left, 0);
+          bottom = MAX2(bottom, 0);
+          right = MIN2(right, (int64_t)width);
+          top = MIN2(top, (int64_t)height);
+          if (right <= left || top <= bottom)
+-            return false;
++            ZMR_REJECT();
+       }
+       struct pipe_surface selected = {
+          .texture = (struct pipe_resource *)&r->base, .format = r->base.format,
+@@ -7887,7 +7948,7 @@ ps5_blit_gpu_color(struct ps5_context *context, const struct pipe_blit_info *inf
+          if ((r->base.target != PIPE_TEXTURE_2D && !(resolve && !i)) ||
+              r->base.last_level || (!resolve && b->z) ||
+              ps5_linear_sampled_layout(&r->base) || r->render_staging_size)
+-            return false;
++            ZMR_REJECT();
+          offset = (size_t)b->z * r->layer_stride;
+          spans[i] = resolve && !i ? ps5_tiled_color_msaa4_surface_size(
+              r->base.format, r->base.width0, r->base.height0) :
+@@ -7895,27 +7956,39 @@ ps5_blit_gpu_color(struct ps5_context *context, const struct pipe_blit_info *inf
+                                            r->base.height0);
+       }
+       if (!spans[i] || offset > r->allocation_size || spans[i] > r->allocation_size - offset)
+-         return false;
++         ZMR_REJECT();
+       addresses[i] = (uintptr_t)r->data + offset;
+    }
+    /* Different mips/layers can share an allocation, never the same bytes. */
+    if (addresses[0] < addresses[1] + spans[1] &&
+        addresses[1] < addresses[0] + spans[0])
+-      return false;
++      ZMR_REJECT();
+ 
+    if (!context->blitter)
+       context->blitter = util_blitter_create(&context->base);
+    struct blitter_context *blitter = context->blitter;
+    if (!blitter || blitter->running || !util_blitter_is_blit_supported(blitter, info))
+-      return false;
++      ZMR_REJECT();
+    struct pipe_surface surface;
+    struct pipe_sampler_view templ;
+    util_blitter_default_dst_texture(&surface, info->dst.resource, info->dst.level, info->dst.box.z);
+    util_blitter_default_src_texture(blitter, &templ, info->src.resource, info->src.level);
++   /* Honour the blit's view formats (sRGB decode/encode follow GL state). */
++   static int zmr_viewfmt = -1;
++   if (zmr_viewfmt < 0) {
++      const char *e = getenv("PS5_BLIT_VIEWFMT");
++      zmr_viewfmt = e ? atoi(e) : 0;
++      printf("[ps5-gallium] zmr blit view formats mode %d\n", zmr_viewfmt);
++   }
++   /* 1: blit view formats (GL semantics); 0: resource formats; 2: src only. */
++   if (zmr_viewfmt == 1 || zmr_viewfmt == 2)
++      templ.format = info->src.format;
++   if (zmr_viewfmt == 1)
++      surface.format = info->dst.format;
+    struct pipe_sampler_view *view = context->base.create_sampler_view(
+       &context->base, info->src.resource, &templ);
+    if (!view)
+-      return false;
++      ZMR_REJECT();
+ 
+    uint16_t viewport_valid = context->viewport_valid;
+    uint16_t scissor_valid = context->scissor_valid;
+@@ -7988,6 +8061,20 @@ ps5_blit(struct pipe_context *context, const struct pipe_blit_info *info)
+    /* u_blitter suspends query accounting; deferred slots retain that state. */
+    if (ps5_blit_gpu_color(ps5, info))
+       return;
++   {
++      if (zmr_blit_log_once(0, info)) {
++         printf("[ps5-gallium] zmr sw-blit src=%s %ux%u bind=%#x samples=%u lvl=%u last=%u "
++                "dst=%s %ux%u bind=%#x samples=%u lvl=%u last=%u mask=%#x filter=%u scissor=%d "
++                "srcbox=%d,%d %dx%d dstbox=%d,%d %dx%d\n",
++                util_format_short_name(info->src.format), info->src.resource->width0, info->src.resource->height0,
++                info->src.resource->bind, info->src.resource->nr_samples, info->src.level, info->src.resource->last_level,
++                util_format_short_name(info->dst.format), info->dst.resource->width0, info->dst.resource->height0,
++                info->dst.resource->bind, info->dst.resource->nr_samples, info->dst.level, info->dst.resource->last_level,
++                info->mask, info->filter, info->scissor_enable,
++                info->src.box.x, info->src.box.y, info->src.box.width, info->src.box.height,
++                info->dst.box.x, info->dst.box.y, info->dst.box.width, info->dst.box.height);
++      }
++   }
+    ps5_draw_batch_drain_buffer(info ? info->src.resource : NULL);
+    ps5_draw_batch_drain_buffer(info ? info->dst.resource : NULL);
+    if (PS5_ENABLE_MSAA4_CANDIDATE && info && info->src.resource &&

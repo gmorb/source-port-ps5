@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="560" viewBox="0 0 960 560" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#15191c"/>
+      <stop offset="1" stop-color="#0d0f11"/>
+    </linearGradient>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f28c28"/>
+    </marker>
+    <style>
+      .box{fill:#1d2328;stroke:#3a434b;stroke-width:1.5}
+      .hl{fill:#2a2017;stroke:#f28c28;stroke-width:2}
+      .t{fill:#ece6dc;font-size:17px;font-weight:600}
+      .s{fill:#a9b1b8;font-size:13px}
+      .h{fill:#f28c28;font-size:13px;font-weight:700;letter-spacing:2px}
+      .ln{stroke:#f28c28;stroke-width:2;fill:none;marker-end:url(#arr)}
+    </style>
+  </defs>
+  <rect width="960" height="560" rx="14" fill="url(#bg)"/>
+  <text x="30" y="40" class="h">SOURCE PORT · HOW IT FITS TOGETHER</text>
+
+  <!-- game layer -->
+  <rect x="30" y="62" width="900" height="70" rx="10" class="box"/>
+  <text x="50" y="92" class="t">Your game files</text>
+  <text x="50" y="114" class="s">hl2/ and platform/ from your own Half-Life 2 (steam_legacy), copied to the app's game/ folder · never shipped</text>
+
+  <!-- engine -->
+  <rect x="30" y="152" width="560" height="110" rx="10" class="hl"/>
+  <text x="50" y="182" class="t">Source engine (nillerusr/source-engine) + PS5 patches</text>
+  <text x="50" y="204" class="s">engine · client · server · materialsystem · vgui · inputsystem · sound</text>
+  <text x="50" y="226" class="s">all modules statically linked into one eboot.bin (no dlopen on PS5)</text>
+  <text x="50" y="248" class="s">togl: Direct3D 9 calls translated to OpenGL</text>
+
+  <rect x="610" y="152" width="320" height="110" rx="10" class="box"/>
+  <text x="630" y="182" class="t">PS5 runtime layer</text>
+  <text x="630" y="204" class="s">file overlay: /app0/game (read-only)</text>
+  <text x="630" y="224" class="s">+ /download0 (configs, saves, logs)</text>
+  <text x="630" y="244" class="s">libc/locale shims · logging · controller cfg</text>
+
+  <!-- platform -->
+  <rect x="30" y="300" width="430" height="110" rx="10" class="box"/>
+  <text x="50" y="330" class="t">ps5-opengl (Mesa 26 · OpenGL 4.6)</text>
+  <text x="50" y="352" class="s">Gallium driver on the PS5's AGC GPU interface</text>
+  <text x="50" y="374" class="s">patched here: GPU blits for presents, refraction</text>
+  <text x="50" y="394" class="s">and screen-effect copies (was CPU)</text>
+
+  <rect x="480" y="300" width="450" height="110" rx="10" class="box"/>
+  <text x="500" y="330" class="t">SDL2 (ps5-payload-dev fork)</text>
+  <text x="500" y="352" class="s">window + GL context bridge · DualSense via ScePad</text>
+  <text x="500" y="374" class="s">audio via sceAudioOut (enabled here)</text>
+
+  <!-- system -->
+  <rect x="30" y="448" width="900" height="80" rx="10" class="box"/>
+  <text x="50" y="478" class="t">PS5 system (jailbroken: kstuff · ShadowMountPlus)</text>
+  <text x="50" y="500" class="s">native folder app built with ps5-payload-dev SDK + ps5-native-app-boilerplate · AGC · VideoOut · AudioOut · Pad</text>
+
+  <path d="M310 132 L310 150" class="ln"/>
+  <path d="M590 207 L608 207" class="ln"/>
+  <path d="M245 262 L245 298" class="ln"/>
+  <path d="M500 262 L620 298" class="ln"/>
+  <path d="M245 410 L245 446" class="ln"/>
+  <path d="M705 410 L705 446" class="ln"/>
+</svg>
