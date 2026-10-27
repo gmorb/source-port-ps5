@@ -103,7 +103,7 @@
 | Left stick | Move | Right stick | Look |
 | **R2** | Fire | **L2** | Secondary fire |
 | **R1** | Next weapon | **L1** | Previous weapon |
-| **✕ Cross** | Jump | **◯ Circle** | Crouch (hold) |
+| **✕ Cross** | Jump | **◯ Circle** | Crouch on/off |
 | **▢ Square** | Reload | **△ Triangle** | Use / pick up |
 | **L3** | Sprint on/off (after you get the HEV suit) | **R3** | Zoom (hold) |
 | **D-pad ↑** | Flashlight | **D-pad ↓** | Last weapon |

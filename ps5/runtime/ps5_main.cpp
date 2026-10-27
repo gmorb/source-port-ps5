@@ -6,6 +6,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/param.h>
+#include <sys/mount.h>
 #include <ucontext.h>
 #include <unistd.h>
 #include <pthread.h>
@@ -214,6 +216,16 @@ extern "C" void __wrap_SDL_GL_SwapWindow( void *window )
 	{
 		printf( "[zmr] fps %.1f (frame %lu)\n", ( g_frames - s_lastFrames ) / dt, g_frames );
 		s_last = now; s_lastFrames = g_frames;
+		// Keep the log from filling the app's 256 MiB data area: stdout/stderr
+		// are append-mode streams, so truncating the file is safe.
+		char logPath[300];
+		struct stat st;
+		snprintf( logPath, sizeof( logPath ), "%s/zmr.log", g_baseDir );
+		if ( stat( logPath, &st ) == 0 && st.st_size > 32 * 1024 * 1024 )
+		{
+			truncate( logPath, 0 );
+			printf( "[zmr] zmr.log reached 32 MiB and was cleared (frame %lu)\n", g_frames );
+		}
 	}
 }
 
@@ -460,8 +472,11 @@ static void WriteControllerConfig( const char *game )
 		"alias sprint_toggle sprint_on\n"
 		"alias sprint_on \"+speed; alias sprint_toggle sprint_off\"\n"
 		"alias sprint_off \"-speed; alias sprint_toggle sprint_on\"\n"
+		"alias duck_toggle duck_on\n"
+		"alias duck_on \"+duck; alias duck_toggle duck_off\"\n"
+		"alias duck_off \"-duck; alias duck_toggle duck_on\"\n"
 		"bind A_BUTTON \"+jump\"\n"              /* Cross */
-		"bind B_BUTTON \"+duck\"\n"              /* Circle (hold) */
+		"bind B_BUTTON \"duck_toggle\"\n"        /* Circle: crouch on/off */
 		"bind X_BUTTON \"+reload\"\n"            /* Square */
 		"bind Y_BUTTON \"+use\"\n"               /* Triangle */
 		"bind R_TRIGGER \"+attack\"\n"           /* R2 */
@@ -646,6 +661,23 @@ int main( int, char ** )
 	zmr_fs_diagnose( titleId );
 	zmr_fs_init( titleId );
 	WriteControllerConfig( cfgGame );
+	// -condebug appends to console.log across sessions; start fresh when it gets big.
+	{
+		char p[300];
+		struct stat st;
+		snprintf( p, sizeof( p ), "%s/%s/console.log", g_baseDir, cfgGame );
+		if ( stat( p, &st ) == 0 && st.st_size > 16 * 1024 * 1024 )
+			unlink( p );
+	}
+	// Report free space in the data area: a full /download0 makes saves (and
+	// the level-transition save) fail.
+	{
+		struct statfs sf;
+		if ( statfs( g_baseDir, &sf ) == 0 )
+			printf( "[zmr] data area free %llu MiB of %llu MiB\n",
+				(unsigned long long)sf.f_bavail * sf.f_bsize >> 20,
+				(unsigned long long)sf.f_blocks * sf.f_bsize >> 20 );
+	}
 	// Show what the app can see of its packaged game files (helps users check
 	// that hl2/ and platform/ ended up in the right folder).
 	{
