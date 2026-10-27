@@ -23,13 +23,137 @@ index d12228b..ad9e403 100644
      add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -g)
      add_link_options(-fsanitize=address,undefined)
 diff --git a/src/gallium/ps5/ps5_screen.c b/src/gallium/ps5/ps5_screen.c
-index 2f6a1b6..2c64b28 100644
+index 2f6a1b6..08896c2 100644
 --- a/src/gallium/ps5/ps5_screen.c
 +++ b/src/gallium/ps5/ps5_screen.c
-@@ -7774,12 +7774,52 @@ ps5_replicate_depth_stencil_msaa4(struct pipe_context *context,
+@@ -264,6 +264,10 @@ static void ps5_prepare_scope_end(struct ps5_prepare_scope *scope)
+ }
+ #endif
+ 
++/* zmr: hang breadcrumbs provided by the title (weak: absent elsewhere). */
++extern void zmr_crumb_note(const char *what, unsigned a, unsigned b) __attribute__((weak));
++#define ZMR_NOTE(w, a, b) do { if (zmr_crumb_note) zmr_crumb_note((w), (unsigned)(a), (unsigned)(b)); } while (0)
++
+ static uint64_t ps5_texture_publication_epoch = 1;
+ 
+ static void
+@@ -4784,8 +4788,75 @@ ps5_render_arena_allocate(struct ps5_screen *screen,
+    return false;
+ }
+ 
++static void ps5_release_resource_memory_now(void *address, size_t bytes, int64_t direct);
++
++/* zmr: GPU work queued before a resource is destroyed can still read or
++ * write its memory (deferred batches, blits, uploads that hold no reference).
++ * Unmapping it then makes the GPU fault and the system stops the whole app.
++ * Destroyed memory now waits until every GPU batch submitted before the
++ * destroy has finished. ps5_gl_deferred_free = 0 restores immediate release. */
++int ps5_gl_deferred_free = 1;
++unsigned long ps5_gl_deferred_free_peak;
++extern volatile unsigned long ps5_gl_batches_submitted, ps5_gl_batches_retired;
++struct ps5_graveyard_entry { void *address; size_t bytes; int64_t direct; unsigned long mark; };
++static struct ps5_graveyard_entry ps5_graveyard[4096];
++static unsigned ps5_graveyard_count;
++static simple_mtx_t ps5_graveyard_mutex = SIMPLE_MTX_INITIALIZER;
++
++static void
++ps5_graveyard_reap_locked(bool all)
++{
++   const unsigned long retired = ps5_gl_batches_retired;
++   unsigned kept = 0;
++   for (unsigned i = 0; i < ps5_graveyard_count; ++i) {
++      struct ps5_graveyard_entry e = ps5_graveyard[i];
++      if (all || retired >= e.mark)
++         ps5_release_resource_memory_now(e.address, e.bytes, e.direct);
++      else
++         ps5_graveyard[kept++] = e;
++   }
++   ps5_graveyard_count = kept;
++}
++
++void
++ps5_graveyard_reap(void)
++{
++   simple_mtx_lock(&ps5_graveyard_mutex);
++   ps5_graveyard_reap_locked(false);
++   simple_mtx_unlock(&ps5_graveyard_mutex);
++}
++
+ static void
+ ps5_release_resource_memory(void *address, size_t bytes, int64_t direct)
++{
++   if (!address && direct < 0)
++      return;
++   if (!ps5_gl_deferred_free) {
++      ps5_release_resource_memory_now(address, bytes, direct);
++      return;
++   }
++   simple_mtx_lock(&ps5_graveyard_mutex);
++   ps5_graveyard_reap_locked(false);
++   if (ps5_graveyard_count == ARRAY_SIZE(ps5_graveyard)) {
++      /* Full: give the GPU up to 2 s to retire, then release regardless. */
++      for (unsigned waits = 0; waits < 2000 && ps5_graveyard_count == ARRAY_SIZE(ps5_graveyard); ++waits) {
++         simple_mtx_unlock(&ps5_graveyard_mutex);
++         usleep(1000);
++         simple_mtx_lock(&ps5_graveyard_mutex);
++         ps5_graveyard_reap_locked(false);
++      }
++      if (ps5_graveyard_count == ARRAY_SIZE(ps5_graveyard))
++         ps5_graveyard_reap_locked(true);
++   }
++   ps5_graveyard[ps5_graveyard_count++] = (struct ps5_graveyard_entry){
++      address, bytes, direct, ps5_gl_batches_submitted + 1};
++   if (ps5_graveyard_count > ps5_gl_deferred_free_peak)
++      ps5_gl_deferred_free_peak = ps5_graveyard_count;
++   simple_mtx_unlock(&ps5_graveyard_mutex);
++}
++
++static void
++ps5_release_resource_memory_now(void *address, size_t bytes, int64_t direct)
+ {
+    int unmap_status = address ? munmap(address, bytes) : 0;
+    int32_t release_status = 0;
+@@ -5273,6 +5344,9 @@ ps5_resource_create(struct pipe_screen *screen,
+    simple_mtx_lock(&ps5->resource_mutex);
+    resource = ps5_resource_create_unlocked(screen, templ);
+    simple_mtx_unlock(&ps5->resource_mutex);
++   ZMR_NOTE(templ->target == PIPE_BUFFER ? "res+ buffer" : "res+ texture",
++            templ->target == PIPE_BUFFER ? templ->width0 : (templ->width0 << 16 | (templ->height0 & 0xffff)),
++            resource ? ((struct ps5_resource *)resource)->allocation_size : 0xffffffffu);
+    return resource;
+ }
+ 
+@@ -5827,6 +5901,9 @@ ps5_resource_destroy(struct pipe_screen *screen, struct pipe_resource *base)
+       resource->base.format == PIPE_FORMAT_Z32_FLOAT;
+ #endif
+ 
++   ZMR_NOTE(base->target == PIPE_BUFFER ? "res- buffer" : "res- texture",
++            base->target == PIPE_BUFFER ? base->width0 : (base->width0 << 16 | (base->height0 & 0xffff)),
++            render_pool_owner ? 1 : 0);
+    simple_mtx_lock(&ps5->resource_mutex);
+    if (render_pool_owner) {
+       ps5_render_arena_mark(ps5, resource->render_arena_first_slot,
+@@ -6866,6 +6943,8 @@ ps5_transfer_map(struct pipe_context *context, struct pipe_resource *base,
+    struct ps5_transfer *transfer;
+    size_t offset;
+    unsigned format_size;
++   ZMR_NOTE(base && base->target == PIPE_BUFFER ? "map buffer" : "map texture",
++            box ? (unsigned)box->width : 0, usage);
+ 
+    (void)context;
+    if (!out_transfer)
+@@ -7774,12 +7853,62 @@ ps5_replicate_depth_stencil_msaa4(struct pipe_context *context,
            info->dst.box.width, info->dst.box.height, info->mask);
  }
  
++/* zmr: hang breadcrumbs provided by the title (weak: absent elsewhere). */
++extern void zmr_crumb_note(const char *what, unsigned a, unsigned b) __attribute__((weak));
++/* zmr: runtime switches (title command menu) to route blits to the CPU. */
++int ps5_gl_cpu_present_blit, ps5_gl_cpu_blits;
++/* 1 = don't append the display flip to the frame's GPU work; the swap waits
++ * for the GPU to go idle and submits the flip from the CPU (freeze test). */
++int ps5_gl_cpu_flip;
++#define ZMR_NOTE(w, a, b) do { if (zmr_crumb_note) zmr_crumb_note((w), (unsigned)(a), (unsigned)(b)); } while (0)
 +static bool zmr_blit_log_once(unsigned line, const struct pipe_blit_info *info)
 +{
 +   /* One line per distinct (reason, formats, sizes, binds, mip count). */
@@ -75,12 +199,14 @@ index 2f6a1b6..2c64b28 100644
 +      zmr_gpu_blit = !(e && e[0] == '0');
 +      printf("[ps5-gallium] zmr gpu blit %s\n", zmr_gpu_blit ? "enabled" : "disabled");
 +   }
++   if (ps5_gl_cpu_blits)
++      return false;
 +   if (!PS5_ENABLE_RENDER_TO_TEXTURE_CANDIDATE ||
 +       (!PS5_ENABLE_MRT_CANDIDATE && !zmr_gpu_blit) ||
         !PS5_ENABLE_UBO_CANDIDATE || !context || !info ||
         !info->src.resource || !info->dst.resource ||
         info->mask != PIPE_MASK_RGBA ||
-@@ -7790,7 +7830,7 @@ ps5_blit_gpu_color(struct ps5_context *context, const struct pipe_blit_info *inf
+@@ -7790,7 +7919,7 @@ ps5_blit_gpu_color(struct ps5_context *context, const struct pipe_blit_info *inf
         !info->src.box.width || !info->src.box.height ||
         info->src.box.width == INT_MIN || info->src.box.height == INT_MIN ||
         info->dst.box.width <= 0 || info->dst.box.height <= 0)
@@ -89,7 +215,7 @@ index 2f6a1b6..2c64b28 100644
  
     int64_t left = info->dst.box.x, bottom = info->dst.box.y;
     int64_t right = left + info->dst.box.width, top = bottom + info->dst.box.height;
-@@ -7810,7 +7850,7 @@ ps5_blit_gpu_color(struct ps5_context *context, const struct pipe_blit_info *inf
+@@ -7810,7 +7939,7 @@ ps5_blit_gpu_color(struct ps5_context *context, const struct pipe_blit_info *inf
     if (right <= left || top <= bottom ||
         (!dst_clipped &&
          (uint64_t)(right - left) * (top - bottom) < PS5_GPU_BLIT_MIN_PIXELS))
@@ -98,7 +224,7 @@ index 2f6a1b6..2c64b28 100644
  
     const bool resolve = info->src.resource->nr_samples == 4 &&
                          info->src.resource->nr_storage_samples == 4;
-@@ -7818,7 +7858,7 @@ ps5_blit_gpu_color(struct ps5_context *context, const struct pipe_blit_info *inf
+@@ -7818,7 +7947,7 @@ ps5_blit_gpu_color(struct ps5_context *context, const struct pipe_blit_info *inf
     if (resolve && (!PS5_ENABLE_MSAA4_CANDIDATE ||
                     abs(info->src.box.width) != info->dst.box.width ||
                     abs(info->src.box.height) != info->dst.box.height))
@@ -107,7 +233,7 @@ index 2f6a1b6..2c64b28 100644
  
     const struct ps5_resource *resources[] = {
        (const struct ps5_resource *)info->src.resource,
-@@ -7828,13 +7868,32 @@ ps5_blit_gpu_color(struct ps5_context *context, const struct pipe_blit_info *inf
+@@ -7828,13 +7957,32 @@ ps5_blit_gpu_color(struct ps5_context *context, const struct pipe_blit_info *inf
     const unsigned levels[] = {info->src.level, info->dst.level};
     uintptr_t addresses[2];
     size_t spans[2];
@@ -120,7 +246,7 @@ index 2f6a1b6..2c64b28 100644
 +   }
 +   /* zmr: the frame present copies the sRGB back buffer into the BGRA
 +    * window surface; the blitter converts between the two formats. */
-+   const bool zmr_present = zmr_gpu_present &&
++   const bool zmr_present = zmr_gpu_present && !ps5_gl_cpu_present_blit &&
 +      (info->src.format == PIPE_FORMAT_R8G8B8A8_SRGB || info->src.format == PIPE_FORMAT_R8G8B8A8_UNORM ||
 +       info->src.format == PIPE_FORMAT_B8G8R8A8_SRGB || info->src.format == PIPE_FORMAT_B8G8R8A8_UNORM) &&
 +      (info->dst.format == PIPE_FORMAT_B8G8R8A8_UNORM || info->dst.format == PIPE_FORMAT_R8G8B8A8_UNORM ||
@@ -142,7 +268,7 @@ index 2f6a1b6..2c64b28 100644
     for (unsigned i = 0; i < 2; ++i) {
        const struct ps5_resource *r = resources[i];
        const struct pipe_box *b = boxes[i];
-@@ -7845,9 +7904,11 @@ ps5_blit_gpu_color(struct ps5_context *context, const struct pipe_blit_info *inf
+@@ -7845,9 +7993,11 @@ ps5_blit_gpu_color(struct ps5_context *context, const struct pipe_blit_info *inf
            r->base.last_level >= 16 ||
            ((!resolve || i) &&
             (r->base.nr_samples > 1 || r->base.nr_storage_samples > 1)) ||
@@ -156,7 +282,7 @@ index 2f6a1b6..2c64b28 100644
            r->depth_staging_size ||
            !r->data || !r->allocation_size ||
            r->allocation_size > UINTPTR_MAX - (uintptr_t)r->data ||
-@@ -7855,7 +7916,7 @@ ps5_blit_gpu_color(struct ps5_context *context, const struct pipe_blit_info *inf
+@@ -7855,7 +8005,7 @@ ps5_blit_gpu_color(struct ps5_context *context, const struct pipe_blit_info *inf
            r->base.width0 > PS5_MAX_COLOR_WIDTH || r->base.height0 > PS5_MAX_COLOR_HEIGHT ||
            (i == 0 && (b->x < 0 || b->y < 0)) || b->z < 0 ||
            (unsigned)b->z >= r->base.array_size || b->depth != 1)
@@ -165,7 +291,7 @@ index 2f6a1b6..2c64b28 100644
        unsigned width = MAX2(r->base.width0 >> levels[i], 1u);
        unsigned height = MAX2(r->base.height0 >> levels[i], 1u);
        /* The destination may extend past the surface (GL clips it with a
-@@ -7864,14 +7925,14 @@ ps5_blit_gpu_color(struct ps5_context *context, const struct pipe_blit_info *inf
+@@ -7864,14 +8014,14 @@ ps5_blit_gpu_color(struct ps5_context *context, const struct pipe_blit_info *inf
            ((unsigned)b->x > width || (unsigned)b->y > height ||
             (int64_t)b->x + b->width < 0 || (int64_t)b->y + b->height < 0 ||
             (int64_t)b->x + b->width > width || (int64_t)b->y + b->height > height))
@@ -182,7 +308,7 @@ index 2f6a1b6..2c64b28 100644
        }
        struct pipe_surface selected = {
           .texture = (struct pipe_resource *)&r->base, .format = r->base.format,
-@@ -7887,7 +7948,7 @@ ps5_blit_gpu_color(struct ps5_context *context, const struct pipe_blit_info *inf
+@@ -7887,7 +8037,7 @@ ps5_blit_gpu_color(struct ps5_context *context, const struct pipe_blit_info *inf
           if ((r->base.target != PIPE_TEXTURE_2D && !(resolve && !i)) ||
               r->base.last_level || (!resolve && b->z) ||
               ps5_linear_sampled_layout(&r->base) || r->render_staging_size)
@@ -191,7 +317,7 @@ index 2f6a1b6..2c64b28 100644
           offset = (size_t)b->z * r->layer_stride;
           spans[i] = resolve && !i ? ps5_tiled_color_msaa4_surface_size(
               r->base.format, r->base.width0, r->base.height0) :
-@@ -7895,27 +7956,39 @@ ps5_blit_gpu_color(struct ps5_context *context, const struct pipe_blit_info *inf
+@@ -7895,27 +8045,39 @@ ps5_blit_gpu_color(struct ps5_context *context, const struct pipe_blit_info *inf
                                             r->base.height0);
        }
        if (!spans[i] || offset > r->allocation_size || spans[i] > r->allocation_size - offset)
@@ -235,10 +361,24 @@ index 2f6a1b6..2c64b28 100644
  
     uint16_t viewport_valid = context->viewport_valid;
     uint16_t scissor_valid = context->scissor_valid;
-@@ -7988,6 +8061,20 @@ ps5_blit(struct pipe_context *context, const struct pipe_blit_info *info)
+@@ -7947,6 +8109,7 @@ ps5_blit_gpu_color(struct ps5_context *context, const struct pipe_blit_info *inf
+       .minx = (uint16_t)left, .miny = (uint16_t)bottom,
+       .maxx = (uint16_t)right, .maxy = (uint16_t)top,
+    };
++   ZMR_NOTE(zmr_present ? "gpu-blit present" : "gpu-blit", info->src.resource->width0 * 65536u + info->src.resource->height0, info->dst.resource->width0 * 65536u + info->dst.resource->height0);
+    util_blitter_blit_generic(blitter, &surface, &info->dst.box, view, &info->src.box,
+                              info->src.resource->width0, info->src.resource->height0,
+                              info->mask, info->filter, &clip,
+@@ -7986,8 +8149,25 @@ ps5_blit(struct pipe_context *context, const struct pipe_blit_info *info)
+    unsigned min_x, min_y, max_x, max_y;
+ 
     /* u_blitter suspends query accounting; deferred slots retain that state. */
-    if (ps5_blit_gpu_color(ps5, info))
+-   if (ps5_blit_gpu_color(ps5, info))
++   if (ps5_blit_gpu_color(ps5, info)) {
++      ZMR_NOTE("gpu-blit done", 0, 0);
        return;
++   }
++   ZMR_NOTE("cpu-blit", info->src.resource->width0 * 65536u + info->src.resource->height0, info->dst.resource->width0 * 65536u + info->dst.resource->height0);
 +   {
 +      if (zmr_blit_log_once(0, info)) {
 +         printf("[ps5-gallium] zmr sw-blit src=%s %ux%u bind=%#x samples=%u lvl=%u last=%u "
@@ -256,3 +396,155 @@ index 2f6a1b6..2c64b28 100644
     ps5_draw_batch_drain_buffer(info ? info->src.resource : NULL);
     ps5_draw_batch_drain_buffer(info ? info->dst.resource : NULL);
     if (PS5_ENABLE_MSAA4_CANDIDATE && info && info->src.resource &&
+@@ -11646,8 +11826,11 @@ ps5_context_queue_present(struct pipe_context *base, unsigned buffer_index)
+ {
+ #ifdef PS5_GPU_PRESENT_BATCH
+    extern int ps5_agc_gate2_batch_present(unsigned);
++   ZMR_NOTE("queue-present", buffer_index, ps5_deferred.count);
++   ps5_graveyard_reap();
+    simple_mtx_lock(&ps5_deferred_mutex);
+-   if (ps5_deferred.owner == (struct ps5_context *)base && ps5_deferred.count &&
++   if (!ps5_gl_cpu_flip &&
++       ps5_deferred.owner == (struct ps5_context *)base && ps5_deferred.count &&
+        ps5_agc_gate2_batch_present(buffer_index) != 0) {
+       fputs("[ps5-gallium] queued presentation failed; terminating before resource release\n", stderr);
+       _Exit(EXIT_FAILURE);
+diff --git a/src/platform/ps5_agc_native_runtime.c b/src/platform/ps5_agc_native_runtime.c
+index a5a0803..29c6038 100644
+--- a/src/platform/ps5_agc_native_runtime.c
++++ b/src/platform/ps5_agc_native_runtime.c
+@@ -1084,7 +1084,20 @@ static struct runtime_shader_pair {
+     uint8_t *source, *memory;
+     int64_t direct;
+     void *vertex, *pixel;
++    int fresh_uses; /* draws still owed a ranged cache acquire */
+ } runtime_shader_pairs[2048];
++/* 0 = off, 1 = acquire new shader memory on its first draws (default),
++ * 2 = acquire shader memory on every draw (diagnostic). Set by the title. */
++int ps5_gl_shader_acquire_mode = 1;
++unsigned long ps5_gl_shader_acquire_count;
++/* Diagnostic: keep every batched draw's own upload acquire instead of
++ * relying on the group leader's (ranged) one. */
++int ps5_gl_keep_batch_acquires;
++/* Diagnostics for the title's hang breadcrumbs: GPU batches handed to the
++ * GPU and batches the GPU has finished. */
++volatile unsigned long ps5_gl_batches_submitted, ps5_gl_batches_retired;
++extern void zmr_crumb_note(const char *what, unsigned a, unsigned b) __attribute__((weak));
++#define ZMR_NOTE(w, a, b) do { if (zmr_crumb_note) zmr_crumb_note((w), (unsigned)(a), (unsigned)(b)); } while (0)
+ static struct runtime_shader_pair *runtime_shader_pair_hot[4096];
+ static unsigned runtime_shader_pair_count;
+ static size_t runtime_shader_pair_bytes;
+@@ -1179,7 +1192,8 @@ static struct runtime_shader_pair *runtime_shader_pair_get_unlocked(
+     }
+     struct runtime_shader_pair p = {.vs_key = runtime_vs_package, .ps_key = runtime_ps_package,
+         .vs_size = runtime_vs_package_len, .ps_size = runtime_ps_package_len,
+-        .bytes = bytes, .primitive = runtime_primitive_type, .direct = -1};
++        .bytes = bytes, .primitive = runtime_primitive_type, .direct = -1,
++        .fresh_uses = 16};
+     p.source = malloc(source_bytes);
+     if (!p.source)
+         return NULL;
+@@ -1699,7 +1713,8 @@ static unsigned runtime_batch_combine(void)
+         /* Every upload is published before this group is submitted. Its first
+          * acquire covers all retained allocations; preserve subsequent draw
+          * bodies and their explicit GPU-to-GPU dependency barriers. */
+-        uint32_t skip = leader && leader->upload_prefix_words &&
++        uint32_t skip = !ps5_gl_keep_batch_acquires &&
++            leader && leader->upload_prefix_words &&
+             entry->upload_prefix_words < entry->completion_offset
+                 ? entry->upload_prefix_words : 0;
+         uint32_t append_words = entry->submit.word_count - skip;
+@@ -1792,6 +1807,8 @@ int ps5_agc_gate2_batch_submit(void)
+     pending->count = runtime_batch_count;
+     pending->attempted = attempted;
+     ++runtime_pending_batches;
++    ++ps5_gl_batches_submitted;
++    ZMR_NOTE("submitted", runtime_batch_count, groups);
+     if (runtime_pending_batches > runtime_pending_peak) {
+         runtime_pending_peak = runtime_pending_batches;
+         printf("[ps5-inflight] peak=%u capacity=%u\n", runtime_pending_peak, PS5_INFLIGHT_BATCH_CAPACITY);
+@@ -1883,6 +1900,7 @@ int ps5_agc_gate2_batch_retire(int wait)
+     memset(pending, 0, sizeof(*pending));
+     runtime_pending_head = (runtime_pending_head + 1) % PS5_INFLIGHT_BATCH_CAPACITY;
+     --runtime_pending_batches;
++    ++ps5_gl_batches_retired;
+     return 1;
+ }
+ 
+@@ -2074,6 +2092,7 @@ int ps5_agc_gate2_batch_present(unsigned buffer_index)
+     if (runtime_async_drain() != 0)
+         return -1;
+ #endif
++    ZMR_NOTE("batch-present", buffer_index, runtime_batch_count);
+     if (ps5_agc_gate2_wait_present() != 0 ||
+         buffer_index > 1 || runtime_gpu_present_buffer >= 0 ||
+         !runtime_video_registered || runtime_video_handle < 0 ||
+@@ -2116,17 +2135,25 @@ int ps5_agc_gate2_batch_present(unsigned buffer_index)
+ 
+ static int runtime_gpu_present_finish(unsigned buffer_index)
+ {
+-    if (runtime_gpu_present_buffer != (int)buffer_index)
++    ZMR_NOTE("present-wait", buffer_index, 0);
++    if (runtime_gpu_present_buffer != (int)buffer_index) {
++        ZMR_NOTE("present-wait wrong-buffer", (unsigned)runtime_gpu_present_buffer, buffer_index);
+         return -1;
++    }
+     for (unsigned waits = 0; waits <= 2000; ++waits) {
+         uint64_t status[16] = {0};
+         int result = runtime_video_api.get_flip_status(runtime_video_handle, status);
+-        if (result != 0)
++        if (result != 0) {
++            ZMR_NOTE("present-wait status-error", (unsigned)result, waits);
+             return result;
++        }
+         int pending = runtime_video_api.is_flip_pending(runtime_video_handle);
+-        if (pending < 0)
++        if (pending < 0) {
++            ZMR_NOTE("present-wait pending-error", (unsigned)pending, waits);
+             return pending;
++        }
+         if (!pending && status[3] == runtime_gpu_present_marker) {
++            ZMR_NOTE("present-wait ok", waits, 0);
+             runtime_gpu_present_buffer = -1;
+             runtime_gpu_present_deferred = 0;
+             if (!runtime_gpu_present_is_cpu)
+@@ -2134,8 +2161,12 @@ static int runtime_gpu_present_finish(unsigned buffer_index)
+             runtime_gpu_present_is_cpu = 0;
+             return 0;
+         }
+-        if (waits == 2000)
++        if (waits == 2000) {
++            ZMR_NOTE("present-wait timeout pending", (unsigned)pending, (unsigned)status[3]);
++            ZMR_NOTE("present-wait timeout want", (unsigned)runtime_gpu_present_marker,
++                     (unsigned)runtime_gpu_present_is_cpu);
+             return -1;
++        }
+         /* Vblank can wake before VideoOut publishes flip status. Sleeping until
+          * another vblank then adds a whole refresh despite completed work. */
+         result = sceKernelUsleep(UINT32_C(1000));
+@@ -4426,6 +4457,25 @@ int main(void)
+ #ifndef PS5_DRAW_GPU_TIMESTAMPS
+     upload_prefix_words = (uint32_t)(command.up - words);
+ #endif
++#endif
++#if defined(PS5_NATIVE_TITLE_RUNTIME) && defined(PS5_MULTIDRAW_BATCH)
++    /* Shader code of a prepared pair lives outside the work allocation, so
++     * the ranged acquire above never wrote back/invalidated GPU L2 lines for
++     * it. Freshly allocated pair memory can alias physical pages the GPU
++     * cached under an earlier mapping; the first draw then fetches stale
++     * instructions and the GPU hangs (once-per-process freezes). Emitted
++     * after the upload prefix so batch combining (which drops follower
++     * prefixes) keeps it. */
++    if (prepared && ps5_gl_shader_acquire_mode &&
++        (ps5_gl_shader_acquire_mode == 2 ||
++         __atomic_load_n(&prepared->fresh_uses, __ATOMIC_RELAXED) > 0)) {
++        if (!runtime_acquire_cpu_uploads(&command, prepared->memory,
++                                         prepared->bytes))
++            goto receipt;
++        if (__atomic_load_n(&prepared->fresh_uses, __ATOMIC_RELAXED) > 0)
++            __atomic_sub_fetch(&prepared->fresh_uses, 1, __ATOMIC_RELAXED);
++        ++ps5_gl_shader_acquire_count;
++    }
+ #endif
+     agc.set_cx(&command, cx, cx_count);
+ #if defined(AGC_BLEND_VARIANT)

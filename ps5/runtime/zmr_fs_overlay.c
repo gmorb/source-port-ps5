@@ -228,10 +228,36 @@ static int add_dir_kernel(ZmrDir *d, size_t *cap, const char *path)
     return any;
 }
 
+/* The packaged game folder (/app0/game) can't be listed at all in the app
+ * sandbox, but stat() works. For the few folders the engine scans by
+ * wildcard, probe the file names it looks for. */
+static void add_probe(ZmrDir *d, size_t *cap, const char *dir, const char *name)
+{
+    char p[PATH_MAX];
+    struct stat st;
+    snprintf(p, sizeof(p), "%s/%s", dir, name);
+    if (__real_stat(p, &st) == 0) add_entry(d, cap, name, S_ISDIR(st.st_mode) ? DT_DIR : DT_REG);
+}
+
+static void add_dir_probe(ZmrDir *d, size_t *cap, const char *path)
+{
+    size_t n = strlen(path);
+    char name[64];
+    if (n >= 4 && !strcmp(path + n - 4, "/cfg")) {
+        /* New Game dialog: one cfg/chapterN.cfg per chapter (HL2 has 9a). */
+        for (int i = 1; i <= 32; ++i) {
+            snprintf(name, sizeof(name), "chapter%d.cfg", i);
+            add_probe(d, cap, path, name);
+            snprintf(name, sizeof(name), "chapter%da.cfg", i);
+            add_probe(d, cap, path, name);
+        }
+    }
+}
+
 static void add_dir(ZmrDir *d, size_t *cap, const char *path)
 {
     DIR *real = __real_opendir(path);
-    if (!real) { add_dir_kernel(d, cap, path); return; }
+    if (!real) { if (!add_dir_kernel(d, cap, path)) add_dir_probe(d, cap, path); return; }
     struct dirent *e;
     while ((e = __real_readdir(real))) add_entry(d, cap, e->d_name, e->d_type);
     __real_closedir(real);

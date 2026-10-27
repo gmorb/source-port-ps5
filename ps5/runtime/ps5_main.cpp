@@ -1,13 +1,12 @@
 // PS5 entry point for the statically linked Source engine.
 #include <errno.h>
+#include <math.h>
 #include <time.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <sys/param.h>
-#include <sys/mount.h>
 #include <ucontext.h>
 #include <unistd.h>
 #include <pthread.h>
@@ -19,6 +18,15 @@ extern "C" int sceKernelDebugOutText( int channel, const char *text );
 extern "C" char zmr_rw_root[256];
 extern "C" void zmr_fs_diagnose( const char *title_id );
 extern "C" void zmr_fs_init( const char *title_id );
+extern "C" void zmr_memdiag_print( unsigned n );
+extern "C" void zmr_hid_preload( void );
+extern "C" void zmr_crumb_note( const char *what, unsigned a, unsigned b );
+extern "C" void zmr_crumbs_heartbeat( void );
+extern "C" void zmr_crumbs_enable( int on );
+extern "C" void zmr_crumbs_stall( unsigned long rip_offset, unsigned long frames );
+extern "C" void zmr_crumbs_init( const char *dir, void ( *out )( const char * ) );
+static void KlogOut( const char *s ) { sceKernelDebugOutText( 0, s ); }
+extern "C" void zmr_breadcrumbs_dump( void (*out)( const char * ) );
 static char g_baseDir[256];
 #define ZMR_PS5_BASEDIR g_baseDir
 #ifndef ZMR_PS5_DEFAULT_ARGS
@@ -99,9 +107,11 @@ static void DrainAtExit()
 // default action, so the system writes its crash report (registers and a
 // full backtrace of the stuck thread) to the kernel log.
 static volatile unsigned long g_frames;
+extern "C" unsigned long zmr_frame_count( void ) { return g_frames; }
 static pthread_t g_mainThread;
+static unsigned long g_mainStackHi;	// a frame address near the top of the main thread's stack
 static bool g_ps5Probe;
-static int g_quitMode = 3; // -ps5_quitN: 1 KillApp, 2 LoadExec(exit), 3 _exit, 4 SIGKILL
+static int g_quitMode = 0; // -ps5_quitN: 0 auto (LoadExec, then KillApp), 1 KillApp, 2 LoadExec(exit), 3 _exit, 4 SIGKILL
 static volatile unsigned g_frameUs[1024]; // duration of the interval while g_frames == i
 extern "C" void __real_SDL_GL_SwapWindow( void *window );
 // GL entry points from the static PS5 OpenGL SDK.
@@ -204,7 +214,9 @@ extern "C" void __wrap_SDL_GL_SwapWindow( void *window )
 	++g_frames;
 	if ( g_ps5Probe && ( g_frames <= 8 || g_frames % 30 == 0 ) )
 		ProbeBackbuffer( g_frames );
+	zmr_crumb_note( "swap begin", 0, 0 );
 	__real_SDL_GL_SwapWindow( window );
+	zmr_crumb_note( "swap end", 0, 0 );
 	// Frame-rate report every 5 seconds.
 	static struct timespec s_last;
 	static unsigned long s_lastFrames;
@@ -216,6 +228,9 @@ extern "C" void __wrap_SDL_GL_SwapWindow( void *window )
 	{
 		printf( "[zmr] fps %.1f (frame %lu)\n", ( g_frames - s_lastFrames ) / dt, g_frames );
 		s_last = now; s_lastFrames = g_frames;
+		static unsigned s_nPrints = 0;
+		if ( s_nPrints++ % 12 == 0 )	// about once a minute
+			zmr_memdiag_print( s_nPrints / 12 );
 		// Keep the log from filling the app's 256 MiB data area: stdout/stderr
 		// are append-mode streams, so truncating the file is safe.
 		char logPath[300];
@@ -223,7 +238,8 @@ extern "C" void __wrap_SDL_GL_SwapWindow( void *window )
 		snprintf( logPath, sizeof( logPath ), "%s/zmr.log", g_baseDir );
 		if ( stat( logPath, &st ) == 0 && st.st_size > 32 * 1024 * 1024 )
 		{
-			truncate( logPath, 0 );
+			int tfd = open( logPath, O_WRONLY | O_TRUNC );	// no truncate()/statfs() in the PS5 libc
+			if ( tfd >= 0 ) close( tfd );
 			printf( "[zmr] zmr.log reached 32 MiB and was cleared (frame %lu)\n", g_frames );
 		}
 	}
@@ -239,29 +255,56 @@ static unsigned long CtxReg( void *ctx, int index )
 }
 enum { REG_RBP = 9, REG_RIP = 20, REG_RSP = 23 };
 
+// hang.txt in the app's data: the freeze report, for fetching over FTP.
+static int g_hangFd = -1;
+static void HangFileWrite( const char *text );
+static void HangOut( const char *text ) { sceKernelDebugOutText( 0, text ); HangFileWrite( text ); }
+static void HangFileWrite( const char *text )
+{
+	if ( g_hangFd < 0 && g_baseDir[0] )
+	{
+		char path[300];
+		snprintf( path, sizeof( path ), "%s/hang.txt", g_baseDir );
+		g_hangFd = open( path, O_WRONLY | O_CREAT | O_TRUNC, 0666 );
+	}
+	if ( g_hangFd >= 0 )
+		write( g_hangFd, text, strlen( text ) );
+}
+
 static void DumpThreadHandler( int, siginfo_t *, void *ctx )
 {
 	unsigned long base = (unsigned long)( __executable_start ? __executable_start : 0 );
 	unsigned long textEnd = base + 0x2b00000;
 	unsigned long rip = CtxReg( ctx, REG_RIP ), rsp = CtxReg( ctx, REG_RSP ), rbp = CtxReg( ctx, REG_RBP );
 	char line[200];
+	zmr_crumbs_stall( rip - base, g_frames );
 	snprintf( line, sizeof( line ), "[zmr] main thread: rip=%#lx (offset %#lx) rsp=%#lx rbp=%#lx\n", rip, rip - base, rsp, rbp );
 	sceKernelDebugOutText( 0, line );
+	HangFileWrite( line );
 	if ( rsp > 0x10000 && ( rsp & 7 ) == 0 )
 	{
 		unsigned long *sp = (unsigned long *)rsp;
-		for ( int i = 0, n = 0; i < 4096 && n < 48; ++i )
+		// Never read past the top of the stack (that faults: 033 crashed
+		// here during a long load).
+		int words = 4096;
+		if ( g_mainStackHi > rsp && ( g_mainStackHi - rsp ) / 8 < (unsigned long)words )
+			words = (int)( ( g_mainStackHi - rsp ) / 8 );
+		else if ( g_mainStackHi <= rsp )
+			words = 0;
+		for ( int i = 0, n = 0; i < words && n < 48; ++i )
 		{
 			unsigned long v = sp[i];
 			if ( v > base && v < textEnd )
 			{
 				snprintf( line, sizeof( line ), "[zmr]   stack[%d] offset %#lx\n", i, v - base );
 				sceKernelDebugOutText( 0, line );
+				HangFileWrite( line );
 				++n;
 			}
 		}
 	}
 	sceKernelDebugOutText( 0, "[zmr] main thread dump done\n" );
+	HangFileWrite( "[zmr] main thread dump done\n" );
 }
 
 
@@ -402,10 +445,14 @@ static void *HangWatchdog( void * )
 {
 	unsigned long last = 0;
 	int stalled = 0;
-	const int limit = 10; // seconds without a new frame
+	const int limit = 5; // seconds without a new frame
 	for ( ;; )
 	{
-		sleep( 1 );
+		for ( int q = 0; q < 4; ++q )
+		{
+			usleep( 250000 );
+			zmr_crumbs_heartbeat();
+		}
 		unsigned long now = g_frames;
 		if ( now != last || now == 0 )
 		{
@@ -417,9 +464,13 @@ static void *HangWatchdog( void * )
 		}
 		if ( ++stalled % limit == 0 && stalled <= limit * 3 )
 		{
-			printf( "[zmr] WATCHDOG: no frame for %d s after %lu frames; dumping main thread\n", limit, now );
-			fflush( NULL );
-			DrainLogToKlog();
+			// Straight to the kernel log and a file: stdio may be locked by
+			// the stuck thread.
+			char msg[160];
+			snprintf( msg, sizeof( msg ), "[zmr] WATCHDOG: no frame for %d s after %lu frames; dumping main thread\n", stalled, now );
+			sceKernelDebugOutText( 0, msg );
+			HangFileWrite( msg );
+			zmr_breadcrumbs_dump( HangOut );
 			struct sigaction sa;
 			memset( &sa, 0, sizeof( sa ) );
 			sa.sa_sigaction = DumpThreadHandler;
@@ -468,7 +519,11 @@ static void WriteControllerConfig( const char *game )
 		"joy_axisbutton_threshold 0.3\n"
 		"+jlook\n"
 		"lookspring 0\n"
-		"hud_fastswitch 1\n"
+		"hud_fastswitch 2\n"                      /* console-style weapon menu: weapon pictures around the crosshair */
+		"con_enable 1\n"
+		"cl_drawmonitors 1\n"                     /* live camera screens on (being fixed: see Troubleshooting tests) */
+		"r_glint_procedural 1\n"                  /* eye glints by texture upload, not a shared render target (Barney freeze, white Vortigaunt eyes) */                          /* console: Square in menus, or the ` key */
+		"cl_software_cursor 1\n"                  /* draw the menu pointer (no OS cursor on PS5) */
 		"alias sprint_toggle sprint_on\n"
 		"alias sprint_on \"+speed; alias sprint_toggle sprint_off\"\n"
 		"alias sprint_off \"-speed; alias sprint_toggle sprint_on\"\n"
@@ -482,10 +537,15 @@ static void WriteControllerConfig( const char *game )
 		"bind R_TRIGGER \"+attack\"\n"           /* R2 */
 		"bind L_TRIGGER \"+attack2\"\n"          /* L2 */
 		"bind R_SHOULDER \"invnext\"\n"          /* R1 */
-		"bind L_SHOULDER \"invprev\"\n"          /* L1 */
+		/* Hold L1: weapon shortcuts on the D-pad (slots 1-4), R1 (slot 5) and
+		 * Square (slot 6); press a direction again to cycle within the slot. */
+		"alias flashlight_toggle \"impulse 100\"\n"
+		"alias +weaponmenu \"_ps5_weaponmenu_down; bind UP slot1; bind RIGHT slot2; bind DOWN slot3; bind LEFT slot4; bind R_SHOULDER slot5; bind X_BUTTON slot6\"\n"
+		"alias -weaponmenu \"_ps5_weaponmenu_up; bind UP flashlight_toggle; bind RIGHT +commandermousemove; bind DOWN lastinv; bind LEFT phys_swap; bind R_SHOULDER invnext; bind X_BUTTON +reload\"\n"
+		"bind L_SHOULDER \"+weaponmenu\"\n"      /* L1 (hold) */
 		"bind STICK1 \"sprint_toggle\"\n"        /* L3: sprint on/off */
 		"bind STICK2 \"+zoom\"\n"                /* R3 (hold) */
-		"bind UP \"impulse 100\"\n"              /* D-pad up: flashlight */
+		"bind UP \"flashlight_toggle\"\n"              /* D-pad up: flashlight */
 		"bind DOWN \"lastinv\"\n"                /* D-pad down: last weapon */
 		"bind LEFT \"phys_swap\"\n"              /* D-pad left: gravity gun swap */
 		"bind RIGHT \"+commandermousemove\"\n"   /* D-pad right: squad command */
@@ -496,6 +556,153 @@ static void WriteControllerConfig( const char *game )
 	snprintf( path, sizeof( path ), "%s/cfg/360controller-linux.cfg", game );
 	if ( ( f = fopen( path, "w" ) ) ) { fputs( "// PS5: see 360controller.cfg\n", f ); fclose( f ); }
 	printf( "[zmr] wrote %s/cfg/360controller.cfg\n", game );
+}
+
+// Menu pointer images for cl_software_cursor (vgui/cursors/*). Written into the
+// writable layer so menus show a pointer even if the game files lack them.
+static void WriteVTF( const char *path, int size, const unsigned char *bgra )
+{
+	FILE *f = fopen( path, "wb" );
+	if ( !f ) { printf( "[zmr] could not write %s\n", path ); return; }
+	unsigned char hdr[80];
+	memset( hdr, 0, sizeof( hdr ) );
+	memcpy( hdr, "VTF", 4 );
+	unsigned int u;
+	unsigned short us;
+	u = 7; memcpy( hdr + 4, &u, 4 );
+	u = 2; memcpy( hdr + 8, &u, 4 );
+	u = 80; memcpy( hdr + 12, &u, 4 );
+	us = (unsigned short)size; memcpy( hdr + 16, &us, 2 ); memcpy( hdr + 18, &us, 2 );
+	u = 0x4 | 0x8 | 0x100 | 0x200 | 0x2000; memcpy( hdr + 20, &u, 4 );	// clamp, nomip, nolod, 8-bit alpha
+	us = 1; memcpy( hdr + 24, &us, 2 );
+	float refl = 0.5f; memcpy( hdr + 32, &refl, 4 ); memcpy( hdr + 36, &refl, 4 ); memcpy( hdr + 40, &refl, 4 );
+	float bump = 1.0f; memcpy( hdr + 48, &bump, 4 );
+	u = 12; memcpy( hdr + 52, &u, 4 );			// IMAGE_FORMAT_BGRA8888
+	hdr[56] = 1;								// mip count
+	u = 0xFFFFFFFFu; memcpy( hdr + 57, &u, 4 );	// no low-res thumbnail
+	us = 1; memcpy( hdr + 63, &us, 2 );			// depth
+	fwrite( hdr, 1, sizeof( hdr ), f );
+	fwrite( bgra, 1, size * size * 4, f );
+	fclose( f );
+}
+
+static bool InPoly( float x, float y, const float *pts, int n )
+{
+	bool in = false;
+	for ( int i = 0, j = n - 1; i < n; j = i++ )
+	{
+		float xi = pts[i * 2], yi = pts[i * 2 + 1], xj = pts[j * 2], yj = pts[j * 2 + 1];
+		if ( ( ( yi > y ) != ( yj > y ) ) && ( x < ( xj - xi ) * ( y - yi ) / ( yj - yi ) + xi ) )
+			in = !in;
+	}
+	return in;
+}
+
+static void WriteCursorImages( const char *game )
+{
+	enum { S = 64 };
+	static unsigned char arrow[S * S * 4], ring[S * S * 4];
+	static unsigned char fill[S * S], edge[S * S];
+	// Classic pointer, tip near (4,4); the engine offsets the arrow by -10%.
+	static const float pts[] = { 4,4, 4,50, 15,39, 23,57, 31,53, 23,36, 38,36 };
+	for ( int y = 0; y < S; ++y )
+		for ( int x = 0; x < S; ++x )
+			fill[y * S + x] = InPoly( x + 0.5f, y + 0.5f, pts, 7 );
+	for ( int y = 0; y < S; ++y )
+		for ( int x = 0; x < S; ++x )
+		{
+			int e = 0;
+			for ( int dy = -2; dy <= 2 && !e; ++dy )
+				for ( int dx = -2; dx <= 2 && !e; ++dx )
+				{
+					int xx = x + dx, yy = y + dy;
+					if ( xx >= 0 && yy >= 0 && xx < S && yy < S && fill[yy * S + xx] )
+						e = 1;
+				}
+			edge[y * S + x] = e;
+		}
+	for ( int i = 0; i < S * S; ++i )
+	{
+		unsigned char *p = arrow + i * 4;
+		if ( fill[i] ) { p[0] = p[1] = p[2] = 255; p[3] = 255; }
+		else if ( edge[i] ) { p[0] = p[1] = p[2] = 0; p[3] = 230; }
+		else { p[0] = p[1] = p[2] = 0; p[3] = 0; }
+	}
+	// Centered ring for the other cursor shapes (their hotspot is the center).
+	for ( int y = 0; y < S; ++y )
+		for ( int x = 0; x < S; ++x )
+		{
+			float dx = x + 0.5f - S / 2, dy = y + 0.5f - S / 2;
+			float d = sqrtf( dx * dx + dy * dy );
+			unsigned char *p = ring + ( y * S + x ) * 4;
+			if ( d >= 10 && d <= 15 ) { p[0] = p[1] = p[2] = 255; p[3] = 255; }
+			else if ( ( d >= 7.5f && d < 10 ) || ( d > 15 && d <= 17.5f ) || d < 3 ) { p[0] = p[1] = p[2] = 0; p[3] = 220; }
+			else { p[0] = p[1] = p[2] = 0; p[3] = 0; }
+		}
+
+	char dir[300];
+	snprintf( dir, sizeof( dir ), "%s/%s", g_baseDir, game ); mkdir( dir, 0777 );
+	snprintf( dir, sizeof( dir ), "%s/%s/materials", g_baseDir, game ); mkdir( dir, 0777 );
+	snprintf( dir, sizeof( dir ), "%s/%s/materials/vgui", g_baseDir, game ); mkdir( dir, 0777 );
+	snprintf( dir, sizeof( dir ), "%s/%s/materials/vgui/cursors", g_baseDir, game ); mkdir( dir, 0777 );
+	static const char *names[] = { "arrow", "ibeam", "hourglass", "crosshair", "waitarrow", "up",
+		"sizenwse", "sizenesw", "sizewe", "sizens", "sizeall", "no", "hand", NULL };
+	for ( int i = 0; names[i]; ++i )
+	{
+		char path[400];
+		snprintf( path, sizeof( path ), "%s/%s.vtf", dir, names[i] );
+		WriteVTF( path, S, i == 0 || i == 4 ? arrow : ring );
+		snprintf( path, sizeof( path ), "%s/%s.vmt", dir, names[i] );
+		if ( FILE *f = fopen( path, "w" ) )
+		{
+			fprintf( f, "\"UnlitGeneric\"\n{\n\t\"$basetexture\" \"vgui/cursors/%s\"\n\t\"$translucent\" 1\n"
+				"\t\"$vertexcolor\" 1\n\t\"$vertexalpha\" 1\n\t\"$ignorez\" 1\n\t\"$nolod\" 1\n}\n", names[i] );
+			fclose( f );
+		}
+	}
+	printf( "[zmr] wrote menu cursor images to %s\n", dir );
+}
+
+// The Triangle command menu's list (generated into zmr_commands.c by
+// gen_commands.py). Replaced when this build's list is newer than the file;
+// the player's own entries live in ps5_commands_custom.txt, never touched.
+extern "C" const int zmr_commands_version;
+extern "C" const char zmr_commands_text[];
+static void WriteCommandList( const char *game )
+{
+	char path[300];
+	snprintf( path, sizeof( path ), "%s/%s/cfg/ps5_commands.txt", g_baseDir, game );
+	int have = -1;
+	if ( FILE *f = fopen( path, "r" ) )
+	{
+		char line[128] = "";
+		if ( fgets( line, sizeof( line ), f ) )
+			sscanf( line, "// ps5-commands-version %d", &have );
+		fclose( f );
+	}
+	if ( have != zmr_commands_version )
+	{
+		if ( FILE *f = fopen( path, "w" ) )
+		{
+			fputs( zmr_commands_text, f );
+			fclose( f );
+			printf( "[zmr] wrote %s (version %d)\n", path, zmr_commands_version );
+		}
+	}
+	snprintf( path, sizeof( path ), "%s/%s/cfg/ps5_commands_custom.txt", g_baseDir, game );
+	struct stat st;
+	if ( stat( path, &st ) != 0 )
+	{
+		if ( FILE *f = fopen( path, "w" ) )
+		{
+			fputs( "// Your own entries for the Triangle command menu (shown as \"My commands\").\n"
+				"// Copy the example block, change the text, and keep each entry's number unique.\n"
+				"\"Commands\"\n{\n"
+				"\t\"1\"\n\t{\n\t\t\"label\"\t\"Example: say hello\"\n\t\t\"command\"\t\"echo Hello from the PS5\"\n"
+				"\t\t\"description\"\t\"Prints a line in the console. Replace with any console command.\"\n\t}\n}\n", f );
+			fclose( f );
+		}
+	}
 }
 
 static int SplitArgs( char *line, char **argv, int max )
@@ -564,6 +771,73 @@ int main( int, char ** )
 		sceKernelDebugOutText( 0, msg );
 	}
 
+	// Previous session: keep its log as zmr-prev.log and replay the freeze
+	// report and the log's last lines into the kernel log, so a freeze or
+	// crash can be diagnosed from the next launch's capture.
+	{
+		char path[300], prev[300], hang[300];
+		snprintf( path, sizeof( path ), "%s/zmr.log", g_baseDir );
+		snprintf( prev, sizeof( prev ), "%s/zmr-prev.log", g_baseDir );
+		snprintf( hang, sizeof( hang ), "%s/hang.txt", g_baseDir );
+		unlink( prev );
+		rename( path, prev );
+		int fd = open( hang, O_RDONLY );
+		if ( fd >= 0 )
+		{
+			sceKernelDebugOutText( 0, "[zmr] ---- previous session froze; its report (hang.txt): ----\n" );
+			char buf[1025];
+			ssize_t n;
+			while ( ( n = read( fd, buf, sizeof( buf ) - 1 ) ) > 0 )
+			{
+				buf[n] = 0;
+				sceKernelDebugOutText( 0, buf );
+			}
+			close( fd );
+			char old[300];
+			snprintf( old, sizeof( old ), "%s/hang-prev.txt", g_baseDir );
+			unlink( old );
+			rename( hang, old );
+		}
+		fd = open( prev, O_RDONLY );
+		if ( fd >= 0 )
+		{
+			// Last ~256 KB, without the driver's statistics noise.
+			off_t end = lseek( fd, 0, SEEK_END );
+			lseek( fd, end > 262144 ? end - 262144 : 0, SEEK_SET );
+			static char tail[262145];
+			ssize_t n = read( fd, tail, sizeof( tail ) - 1 );
+			close( fd );
+			if ( n > 0 )
+			{
+				tail[n] = 0;
+				sceKernelDebugOutText( 0, "[zmr] ---- end of the previous session's log: ----\n" );
+				char *line = strchr( tail, '\n' );	// skip the partial first line
+				line = line ? line + 1 : tail;
+				while ( line && *line )
+				{
+					char *nl = strchr( line, '\n' );
+					if ( nl ) *nl = 0;
+					// Driver statistics are noise, but its error lines (printed
+					// just before it stops the app) are what we need.
+					bool driverError = strstr( line, "fail" ) || strstr( line, "terminat" ) ||
+						strstr( line, "reuse" ) || strstr( line, "error" ) || strstr( line, "abort" );
+					if ( driverError || ( strncmp( line, "[ps5-", 5 ) && strncmp( line, "[gltrace]", 9 ) ) )
+					{
+						char out[600];
+						snprintf( out, sizeof( out ), "[prev] %s\n", line );
+						sceKernelDebugOutText( 0, out );
+					}
+					line = nl ? nl + 1 : NULL;
+				}
+				sceKernelDebugOutText( 0, "[zmr] ---- end of previous session ----\n" );
+			}
+		}
+	}
+
+	// Draw records that survive a GPU hang (see zmr_hid.c); reports the last
+	// session's unfinished GPU work first.
+	zmr_crumbs_init( g_baseDir, KlogOut );
+
 	// Everything the engine prints goes to a log the user can fetch over FTP.
 	{
 		char path[300];
@@ -582,8 +856,10 @@ int main( int, char ** )
 	setvbuf( stdout, NULL, _IONBF, 0 );
 	setvbuf( stderr, NULL, _IONBF, 0 );
 	printf( "Zombie Master PS5 starting, base dir %s\n", ZMR_PS5_BASEDIR );
+	zmr_hid_preload();	// keyboard, mouse and on-screen keyboard system modules
 	atexit( DrainAtExit );
 	g_mainThread = pthread_self();
+	g_mainStackHi = (unsigned long)__builtin_frame_address( 0 );
 	{
 		pthread_t wd;
 		pthread_create( &wd, NULL, HangWatchdog, NULL );
@@ -616,6 +892,7 @@ int main( int, char ** )
 		sscanf( g + 6, "%63s", cfgGame );
 	ps5_gltrace_parse( line );
 	g_ps5Probe = strstr( line, "-ps5_probe" ) != NULL;
+	if ( strstr( line, "-ps5_freeze_recorder" ) ) zmr_crumbs_enable( 1 );
 	if ( strstr( line, "-ps5_nogpublit" ) ) setenv( "PS5_GPU_BLIT", "0", 1 );
 	if ( const char *q = strstr( line, "-ps5_quit" ) )
 		g_quitMode = q[9] >= '0' && q[9] <= '9' ? q[9] - '0' : 1;
@@ -661,6 +938,8 @@ int main( int, char ** )
 	zmr_fs_diagnose( titleId );
 	zmr_fs_init( titleId );
 	WriteControllerConfig( cfgGame );
+	WriteCursorImages( cfgGame );
+	WriteCommandList( cfgGame );
 	// -condebug appends to console.log across sessions; start fresh when it gets big.
 	{
 		char p[300];
@@ -668,15 +947,6 @@ int main( int, char ** )
 		snprintf( p, sizeof( p ), "%s/%s/console.log", g_baseDir, cfgGame );
 		if ( stat( p, &st ) == 0 && st.st_size > 16 * 1024 * 1024 )
 			unlink( p );
-	}
-	// Report free space in the data area: a full /download0 makes saves (and
-	// the level-transition save) fail.
-	{
-		struct statfs sf;
-		if ( statfs( g_baseDir, &sf ) == 0 )
-			printf( "[zmr] data area free %llu MiB of %llu MiB\n",
-				(unsigned long long)sf.f_bavail * sf.f_bsize >> 20,
-				(unsigned long long)sf.f_blocks * sf.f_bsize >> 20 );
 	}
 	// Show what the app can see of its packaged game files (helps users check
 	// that hl2/ and platform/ ended up in the right folder).
@@ -727,6 +997,26 @@ extern "C" int sceSystemServiceGetAppIdOfRunningBigApp( void );
 extern "C" int sceSystemServiceKillApp( int appId, int opt, int method, int reason );
 extern "C" int sceSystemServiceLoadExec( const char *path, char *const argv[] );
 
+// The GL driver stops the app with _Exit() or abort() when it cannot safely
+// continue (for example a display flip that never completes). _Exit is a
+// blocked syscall for apps, so the game just froze with no message. Report
+// it, then leave through the normal quit path so the player gets back to the
+// home screen instead of a frozen picture.
+extern "C" void __wrap_exit( int status );
+static void DriverStop( const char *how, int code )
+{
+	char msg[200];
+	snprintf( msg, sizeof( msg ), "[zmr] DRIVER STOP: %s(%d) - the graphics driver gave up; quitting to the home screen\n", how, code );
+	fflush( NULL );
+	DrainLogToKlog();	// the driver's own reason, printed just before
+	sceKernelDebugOutText( 0, msg );
+	HangFileWrite( msg );
+	zmr_crumb_note( how, (unsigned)code, 0 );
+	__wrap_exit( 1 );
+}
+extern "C" void __wrap__Exit( int status ) { DriverStop( "_Exit", status ); for ( ;; ) sleep( 1 ); }
+extern "C" void __wrap_abort( void ) { DriverStop( "abort", 0 ); for ( ;; ) sleep( 1 ); }
+
 extern "C" void __wrap_exit( int status )
 {
 	printf( "[zmr] exit(%d): leaving without running destructors (quit mode %d)\n", status, g_quitMode );
@@ -750,6 +1040,17 @@ extern "C" void __wrap_exit( int status )
 		kill( getpid(), SIGKILL );
 		sleep( 2 );
 		break;
+	case 0: {
+		// _exit() is a blocked syscall for apps (SIGSYS -> crash report), so
+		// ask the system to close the app the way SDL's PS5 main does.
+		int rc = sceSystemServiceLoadExec( "exit", NULL );
+		printf( "[zmr] quit: LoadExec(exit) returned %#x\n", rc ); fflush( NULL ); DrainLogToKlog();
+		sleep( 2 );
+		int app = sceSystemServiceGetAppIdOfRunningBigApp();
+		rc = sceSystemServiceKillApp( app, -1, 0, 0 );
+		printf( "[zmr] quit: KillApp(%#x) returned %#x\n", app, rc ); fflush( NULL ); DrainLogToKlog();
+		sleep( 2 );
+		break; }
 	default:
 		break;
 	}

@@ -102,7 +102,7 @@
 | --- | --- | --- | --- |
 | Left stick | Move | Right stick | Look |
 | **R2** | Fire | **L2** | Secondary fire |
-| **R1** | Next weapon | **L1** | Previous weapon |
+| **R1** | Next weapon | **L1 (hold)** | Weapon shortcuts (below) |
 | **✕ Cross** | Jump | **◯ Circle** | Crouch on/off |
 | **▢ Square** | Reload | **△ Triangle** | Use / pick up |
 | **L3** | Sprint on/off (after you get the HEV suit) | **R3** | Zoom (hold) |
@@ -110,8 +110,45 @@
 | **D-pad ←** | Gravity-gun swap | **D-pad →** | Squad command |
 | **Touchpad click** | Quicksave | **Options** | Pause menu |
 
+**Weapon menu:** hold **L1** and press a D-pad direction (or R1 / ▢ Square
+for the extra groups). A menu with pictures of your weapons opens around the
+crosshair and switches to the one you pick; press the same direction again
+to cycle through that group. R1 on its own still cycles to the next weapon.
+
+On-screen hints name the DualSense buttons (CROSS, R2, …). They switch to
+keyboard keys while you play with a keyboard and mouse, and back when you
+pick up the controller.
+
 The layout is written to `hl2/cfg/360controller.cfg` in the app's data on
-every start. Menus also work with the D-pad and ✕.
+every start.
+
+**Keyboard and mouse:** a USB keyboard and mouse plugged into the console
+work alongside the controller, with Half-Life 2's usual PC controls (WASD,
+mouse look, the ` key for the developer console).
+
+**Menus** (main menu, pause menu, New Game, Options, Load/Save) are controlled
+with an on-screen pointer:
+
+| Button | Action |
+| --- | --- |
+| Left stick | Move the pointer |
+| **✕ Cross** | Click where the pointer is (hold to drag sliders). After using the D-pad, ✕ presses the highlighted item instead |
+| Right stick | Scroll lists |
+| **◯ Circle** | Back / close the dialog (Escape) |
+| D-pad | Move between items and tabs |
+| **△ Triangle** | Command menu: pick a command from a list (with a description of each) and run it with ✕ |
+| **▢ Square** | Open or close the developer console |
+
+The command menu has about 220 commands in categories: Gameplay, Cheats,
+Weapons, Spawn, Level select (every Half-Life 2 map by chapter), Display,
+Audio, Controls, Troubleshooting and Developer tests (switches used to track
+down bugs; you won't need them for normal play). D-pad ←/→ switches between categories
+and commands. A hint in the corner of the menus shows the buttons. Add your
+own entries to `hl2/cfg/ps5_commands_custom.txt` in the app's data; they
+appear under "My commands".
+
+Pointer speed: `ps5_menu_cursor_speed` (default `1400`); `ps5_menu_cursor 0`
+turns the pointer off.
 
 ## Configuration
 
@@ -129,8 +166,9 @@ Useful additions:
 | `+map d1_trainstation_01` | Start straight into a map |
 | `-nosound` | Disable audio |
 | `-console -dev 2 -condebug` | Open the developer console and write `console.log` |
+| `-ps5_freeze_recorder` | Record the last draws so a freeze is reported on the next launch (also in the △ menu under Developer tests) |
 | `-ps5_prof` | Built-in sampling profiler, written to the log every 30 s (development) |
-| `-ps5_quit1` … `-ps5_quit4` | Alternative ways of quitting the app (see [Known issues](#known-issues)) |
+| `-ps5_quit1` … `-ps5_quit4` | Alternative ways of quitting the app (debugging) |
 
 **Logs** are mirrored to the kernel log, readable with the
 [klogsrv](https://github.com/ps5-payload-dev) payload on port 3232. They are also
@@ -138,9 +176,12 @@ written to `zmr.log` in the app's data. Attach a log to bug reports.
 
 ## Known issues
 
-- **Quitting shows a system error** before returning to the home screen.
-  Nothing is lost: settings and saves are written before the engine exits. The
-  `-ps5_quit1`…`4` options try other exit methods; reports welcome.
+- **Freeze when a character starts a scripted scene**, most often at Barney's
+  checkpoint (when Kleiner appears on the monitor) and in Dr. Kleiner's lab.
+  Close the game from the PS button menu and load the last save. A retry
+  usually gets through, and once a scene has played it won't freeze again
+  until the game is relaunched. This is being worked on; logs made with the
+  freeze recorder (see Configuration) help.
 - **Short hitches the first time an area loads** while shaders are compiled and
   textures are uploaded. They are gone on the next pass.
 - **Only Half-Life 2 has been tested.** Episodes, Lost Coast and mods are not
@@ -179,7 +220,7 @@ ps5/build-all.sh     # engine → static modules → PPSA20040 app folder
 
 ## Roadmap
 
-- [ ] Clean exit to the home screen
+- [x] Clean exit to the home screen
 - [ ] Zombie Master: Reborn (the project's original goal)
 - [ ] Half-Life 2 episodes and Source mods
 - [ ] Shader cache to remove first-load hitches

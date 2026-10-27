@@ -1,0 +1,1392 @@
+// ps5-commands-version 20
+// Triangle command menu (PS5 port). Generated: replaced when the app updates.
+// Add your own commands to ps5_commands_custom.txt instead.
+"Commands"
+{
+	"Gameplay"
+	{
+		"1"
+		{
+			"label"	"Quick save"
+			"command"	"save quick"
+			"description"	"Save to the quicksave slot (same as the touchpad)."
+		}
+		"2"
+		{
+			"label"	"Quick load"
+			"command"	"load quick"
+			"description"	"Load the last quicksave."
+		}
+		"3"
+		{
+			"label"	"Load autosave"
+			"command"	"load autosave"
+			"description"	"Load the most recent autosave (made at level changes)."
+		}
+		"4"
+		{
+			"label"	"Restart level"
+			"command"	"restart"
+			"description"	"Restart the current map from its beginning."
+		}
+		"5"
+		{
+			"label"	"Kill yourself"
+			"command"	"kill"
+			"description"	"Die; any button then reloads the last save."
+		}
+		"6"
+		{
+			"label"	"Difficulty: Easy"
+			"command"	"skill 1"
+			"description"	"Easy difficulty. Takes effect right away."
+		}
+		"7"
+		{
+			"label"	"Difficulty: Normal"
+			"command"	"skill 2"
+			"description"	"Normal difficulty."
+		}
+		"8"
+		{
+			"label"	"Difficulty: Hard"
+			"command"	"skill 3"
+			"description"	"Hard difficulty."
+		}
+		"9"
+		{
+			"label"	"Main menu"
+			"command"	"disconnect"
+			"description"	"Leave the game and go back to the main menu (unsaved progress is lost)."
+		}
+		"10"
+		{
+			"label"	"Quit to home screen"
+			"command"	"quit"
+			"description"	"Close the game."
+		}
+	}
+	"Cheats"
+	{
+		"1"
+		{
+			"label"	"Cheats on"
+			"command"	"sv_cheats 1"
+			"description"	"Allow cheat commands. The entries below turn this on for you."
+		}
+		"2"
+		{
+			"label"	"Cheats off"
+			"command"	"sv_cheats 0"
+			"description"	"Turn cheats off again (cheats already active, like god mode, stay on until toggled)."
+		}
+		"3"
+		{
+			"label"	"God mode"
+			"command"	"sv_cheats 1; god"
+			"description"	"You can't be hurt. Run again to turn off."
+		}
+		"4"
+		{
+			"label"	"Buddha mode"
+			"command"	"sv_cheats 1; buddha"
+			"description"	"You take damage but can't die. Run again to turn off."
+		}
+		"5"
+		{
+			"label"	"Noclip"
+			"command"	"sv_cheats 1; noclip"
+			"description"	"Fly through walls. Run again to turn off."
+		}
+		"6"
+		{
+			"label"	"Invisible to enemies"
+			"command"	"sv_cheats 1; notarget"
+			"description"	"Enemies ignore you. Run again to turn off."
+		}
+		"7"
+		{
+			"label"	"All weapons and ammo"
+			"command"	"sv_cheats 1; impulse 101"
+			"description"	"Every weapon, full ammo and the HEV suit."
+		}
+		"8"
+		{
+			"label"	"Infinite ammo"
+			"command"	"sv_cheats 1; toggle sv_infinite_ammo"
+			"description"	"Weapons never run out or need reloading (on/off)."
+		}
+		"9"
+		{
+			"label"	"Health kit"
+			"command"	"sv_cheats 1; give item_healthkit"
+			"description"	"Restores 25 health."
+		}
+		"10"
+		{
+			"label"	"Suit battery"
+			"command"	"sv_cheats 1; give item_battery"
+			"description"	"Adds 15 suit power."
+		}
+		"11"
+		{
+			"label"	"HEV suit"
+			"command"	"sv_cheats 1; give item_suit"
+			"description"	"Gives the HEV suit (sprint, flashlight, HUD)."
+		}
+		"12"
+		{
+			"label"	"Super gravity gun"
+			"command"	"sv_cheats 1; toggle physcannon_mega_enabled"
+			"description"	"The blue, supercharged gravity gun from the Citadel (on/off)."
+		}
+		"13"
+		{
+			"label"	"Low gravity"
+			"command"	"sv_cheats 1; sv_gravity 200"
+			"description"	"Moon gravity."
+		}
+		"14"
+		{
+			"label"	"Normal gravity"
+			"command"	"sv_gravity 600"
+			"description"	"Back to normal gravity."
+		}
+		"15"
+		{
+			"label"	"Slow motion"
+			"command"	"sv_cheats 1; host_timescale 0.5"
+			"description"	"Half-speed game."
+		}
+		"16"
+		{
+			"label"	"Fast motion"
+			"command"	"sv_cheats 1; host_timescale 2"
+			"description"	"Double-speed game."
+		}
+		"17"
+		{
+			"label"	"Normal speed"
+			"command"	"host_timescale 1"
+			"description"	"Back to normal game speed."
+		}
+		"18"
+		{
+			"label"	"Freeze enemies (AI off)"
+			"command"	"sv_cheats 1; ai_disable"
+			"description"	"Stops all NPC thinking. Run again to resume."
+		}
+		"19"
+		{
+			"label"	"Kill what you aim at"
+			"command"	"sv_cheats 1; npc_kill"
+			"description"	"Kills the creature under your crosshair."
+		}
+		"20"
+		{
+			"label"	"Remove what you aim at"
+			"command"	"sv_cheats 1; ent_remove"
+			"description"	"Deletes the object or creature under your crosshair."
+		}
+		"21"
+		{
+			"label"	"Fullbright"
+			"command"	"sv_cheats 1; toggle mat_fullbright"
+			"description"	"Light everything evenly (on/off)."
+		}
+		"22"
+		{
+			"label"	"Wireframe"
+			"command"	"sv_cheats 1; toggle mat_wireframe"
+			"description"	"Draw the world as wireframe (on/off)."
+		}
+		"23"
+		{
+			"label"	"Third person"
+			"command"	"sv_cheats 1; thirdperson"
+			"description"	"Camera behind the player."
+		}
+		"24"
+		{
+			"label"	"First person"
+			"command"	"firstperson"
+			"description"	"Back to the normal camera."
+		}
+	}
+	"Weapons"
+	{
+		"1"
+		{
+			"label"	"Crowbar"
+			"command"	"sv_cheats 1; give weapon_crowbar"
+			"description"	"Melee. (cheat)"
+		}
+		"2"
+		{
+			"label"	"Gravity gun"
+			"command"	"sv_cheats 1; give weapon_physcannon"
+			"description"	"Pick up and throw objects. (cheat)"
+		}
+		"3"
+		{
+			"label"	"Stunstick"
+			"command"	"sv_cheats 1; give weapon_stunstick"
+			"description"	"Combine melee baton. (cheat)"
+		}
+		"4"
+		{
+			"label"	"Pistol"
+			"command"	"sv_cheats 1; give weapon_pistol"
+			"description"	"9 mm pistol. (cheat)"
+		}
+		"5"
+		{
+			"label"	".357 Magnum"
+			"command"	"sv_cheats 1; give weapon_357"
+			"description"	"Revolver. (cheat)"
+		}
+		"6"
+		{
+			"label"	"SMG"
+			"command"	"sv_cheats 1; give weapon_smg1"
+			"description"	"Submachine gun with grenade launcher. (cheat)"
+		}
+		"7"
+		{
+			"label"	"Pulse rifle"
+			"command"	"sv_cheats 1; give weapon_ar2"
+			"description"	"Combine AR2 with energy balls. (cheat)"
+		}
+		"8"
+		{
+			"label"	"Shotgun"
+			"command"	"sv_cheats 1; give weapon_shotgun"
+			"description"	"Pump shotgun. (cheat)"
+		}
+		"9"
+		{
+			"label"	"Crossbow"
+			"command"	"sv_cheats 1; give weapon_crossbow"
+			"description"	"Scoped crossbow. (cheat)"
+		}
+		"10"
+		{
+			"label"	"Grenade"
+			"command"	"sv_cheats 1; give weapon_frag"
+			"description"	"Frag grenades. (cheat)"
+		}
+		"11"
+		{
+			"label"	"RPG"
+			"command"	"sv_cheats 1; give weapon_rpg"
+			"description"	"Laser-guided rocket launcher. (cheat)"
+		}
+		"12"
+		{
+			"label"	"Bugbait"
+			"command"	"sv_cheats 1; give weapon_bugbait"
+			"description"	"Commands antlions. (cheat)"
+		}
+		"13"
+		{
+			"label"	"Pistol ammo"
+			"command"	"sv_cheats 1; give item_ammo_pistol"
+			"description"	"Ammo pickup. (cheat)"
+		}
+		"14"
+		{
+			"label"	".357 ammo"
+			"command"	"sv_cheats 1; give item_ammo_357"
+			"description"	"Ammo pickup. (cheat)"
+		}
+		"15"
+		{
+			"label"	"SMG ammo"
+			"command"	"sv_cheats 1; give item_ammo_smg1"
+			"description"	"Ammo pickup. (cheat)"
+		}
+		"16"
+		{
+			"label"	"SMG grenade"
+			"command"	"sv_cheats 1; give item_ammo_smg1_grenade"
+			"description"	"Ammo pickup. (cheat)"
+		}
+		"17"
+		{
+			"label"	"Pulse rifle ammo"
+			"command"	"sv_cheats 1; give item_ammo_ar2"
+			"description"	"Ammo pickup. (cheat)"
+		}
+		"18"
+		{
+			"label"	"Pulse rifle energy ball"
+			"command"	"sv_cheats 1; give item_ammo_ar2_altfire"
+			"description"	"Ammo pickup. (cheat)"
+		}
+		"19"
+		{
+			"label"	"Shotgun shells"
+			"command"	"sv_cheats 1; give item_box_buckshot"
+			"description"	"Ammo pickup. (cheat)"
+		}
+		"20"
+		{
+			"label"	"Crossbow bolts"
+			"command"	"sv_cheats 1; give item_ammo_crossbow"
+			"description"	"Ammo pickup. (cheat)"
+		}
+		"21"
+		{
+			"label"	"RPG rocket"
+			"command"	"sv_cheats 1; give item_rpg_round"
+			"description"	"Ammo pickup. (cheat)"
+		}
+	}
+	"Spawn"
+	{
+		"1"
+		{
+			"label"	"Zombie"
+			"command"	"sv_cheats 1; npc_create npc_zombie"
+			"description"	"Spawns where you aim. (cheat)"
+		}
+		"2"
+		{
+			"label"	"Fast zombie"
+			"command"	"sv_cheats 1; npc_create npc_fastzombie"
+			"description"	"Spawns where you aim. (cheat)"
+		}
+		"3"
+		{
+			"label"	"Poison zombie"
+			"command"	"sv_cheats 1; npc_create npc_poisonzombie"
+			"description"	"Spawns where you aim. (cheat)"
+		}
+		"4"
+		{
+			"label"	"Headcrab"
+			"command"	"sv_cheats 1; npc_create npc_headcrab"
+			"description"	"Spawns where you aim. (cheat)"
+		}
+		"5"
+		{
+			"label"	"Fast headcrab"
+			"command"	"sv_cheats 1; npc_create npc_headcrab_fast"
+			"description"	"Spawns where you aim. (cheat)"
+		}
+		"6"
+		{
+			"label"	"Poison headcrab"
+			"command"	"sv_cheats 1; npc_create npc_headcrab_black"
+			"description"	"Spawns where you aim. (cheat)"
+		}
+		"7"
+		{
+			"label"	"Antlion"
+			"command"	"sv_cheats 1; npc_create npc_antlion"
+			"description"	"Spawns where you aim. (cheat)"
+		}
+		"8"
+		{
+			"label"	"Antlion guard"
+			"command"	"sv_cheats 1; npc_create npc_antlionguard"
+			"description"	"Spawns where you aim. Big one. (cheat)"
+		}
+		"9"
+		{
+			"label"	"Combine soldier"
+			"command"	"sv_cheats 1; npc_create npc_combine_s"
+			"description"	"Spawns where you aim. Unarmed unless the map gives it a weapon. (cheat)"
+		}
+		"10"
+		{
+			"label"	"Metrocop"
+			"command"	"sv_cheats 1; npc_create npc_metropolice"
+			"description"	"Spawns where you aim. (cheat)"
+		}
+		"11"
+		{
+			"label"	"Manhack"
+			"command"	"sv_cheats 1; npc_create npc_manhack"
+			"description"	"Spawns where you aim. (cheat)"
+		}
+		"12"
+		{
+			"label"	"Rollermine"
+			"command"	"sv_cheats 1; npc_create npc_rollermine"
+			"description"	"Spawns where you aim. (cheat)"
+		}
+		"13"
+		{
+			"label"	"City scanner"
+			"command"	"sv_cheats 1; npc_create npc_cscanner"
+			"description"	"Spawns where you aim. (cheat)"
+		}
+		"14"
+		{
+			"label"	"Citizen"
+			"command"	"sv_cheats 1; npc_create npc_citizen"
+			"description"	"Spawns where you aim. (cheat)"
+		}
+		"15"
+		{
+			"label"	"Vortigaunt"
+			"command"	"sv_cheats 1; npc_create npc_vortigaunt"
+			"description"	"Spawns where you aim. (cheat)"
+		}
+		"16"
+		{
+			"label"	"Crow"
+			"command"	"sv_cheats 1; npc_create npc_crow"
+			"description"	"Spawns where you aim. (cheat)"
+		}
+		"17"
+		{
+			"label"	"Pigeon"
+			"command"	"sv_cheats 1; npc_create npc_pigeon"
+			"description"	"Spawns where you aim. (cheat)"
+		}
+		"18"
+		{
+			"label"	"Seagull"
+			"command"	"sv_cheats 1; npc_create npc_seagull"
+			"description"	"Spawns where you aim. (cheat)"
+		}
+		"19"
+		{
+			"label"	"Jeep (buggy)"
+			"command"	"sv_cheats 1; ch_createjeep"
+			"description"	"Spawns the scout car in front of you. (cheat)"
+		}
+		"20"
+		{
+			"label"	"Airboat"
+			"command"	"sv_cheats 1; ch_createairboat"
+			"description"	"Spawns the airboat in front of you. (cheat)"
+		}
+		"21"
+		{
+			"label"	"Explosive barrel"
+			"command"	"sv_cheats 1; prop_physics_create props_c17/oildrum001_explosive"
+			"description"	"Spawns a red barrel where you aim. (cheat)"
+		}
+		"22"
+		{
+			"label"	"Wooden crate"
+			"command"	"sv_cheats 1; prop_physics_create props_junk/wood_crate001a"
+			"description"	"Spawns a crate where you aim. (cheat)"
+		}
+	}
+	"Level select"
+	{
+		"1"
+		{
+			"label"	"Point Insertion (1/4)"
+			"command"	"map d1_trainstation_01"
+			"description"	"Load d1_trainstation_01. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"2"
+		{
+			"label"	"Point Insertion (2/4)"
+			"command"	"map d1_trainstation_02"
+			"description"	"Load d1_trainstation_02. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"3"
+		{
+			"label"	"Point Insertion (3/4)"
+			"command"	"map d1_trainstation_03"
+			"description"	"Load d1_trainstation_03. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"4"
+		{
+			"label"	"Point Insertion (4/4)"
+			"command"	"map d1_trainstation_04"
+			"description"	"Load d1_trainstation_04. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"5"
+		{
+			"label"	"A Red Letter Day (1/2)"
+			"command"	"map d1_trainstation_05"
+			"description"	"Load d1_trainstation_05. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"6"
+		{
+			"label"	"A Red Letter Day (2/2)"
+			"command"	"map d1_trainstation_06"
+			"description"	"Load d1_trainstation_06. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"7"
+		{
+			"label"	"Route Kanal (1/5)"
+			"command"	"map d1_canals_01"
+			"description"	"Load d1_canals_01. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"8"
+		{
+			"label"	"Route Kanal (2/5)"
+			"command"	"map d1_canals_01a"
+			"description"	"Load d1_canals_01a. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"9"
+		{
+			"label"	"Route Kanal (3/5)"
+			"command"	"map d1_canals_02"
+			"description"	"Load d1_canals_02. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"10"
+		{
+			"label"	"Route Kanal (4/5)"
+			"command"	"map d1_canals_03"
+			"description"	"Load d1_canals_03. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"11"
+		{
+			"label"	"Route Kanal (5/5)"
+			"command"	"map d1_canals_05"
+			"description"	"Load d1_canals_05. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"12"
+		{
+			"label"	"Water Hazard (1/8)"
+			"command"	"map d1_canals_06"
+			"description"	"Load d1_canals_06. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"13"
+		{
+			"label"	"Water Hazard (2/8)"
+			"command"	"map d1_canals_07"
+			"description"	"Load d1_canals_07. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"14"
+		{
+			"label"	"Water Hazard (3/8)"
+			"command"	"map d1_canals_08"
+			"description"	"Load d1_canals_08. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"15"
+		{
+			"label"	"Water Hazard (4/8)"
+			"command"	"map d1_canals_09"
+			"description"	"Load d1_canals_09. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"16"
+		{
+			"label"	"Water Hazard (5/8)"
+			"command"	"map d1_canals_10"
+			"description"	"Load d1_canals_10. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"17"
+		{
+			"label"	"Water Hazard (6/8)"
+			"command"	"map d1_canals_11"
+			"description"	"Load d1_canals_11. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"18"
+		{
+			"label"	"Water Hazard (7/8)"
+			"command"	"map d1_canals_12"
+			"description"	"Load d1_canals_12. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"19"
+		{
+			"label"	"Water Hazard (8/8)"
+			"command"	"map d1_canals_13"
+			"description"	"Load d1_canals_13. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"20"
+		{
+			"label"	"Black Mesa East (1/2)"
+			"command"	"map d1_eli_01"
+			"description"	"Load d1_eli_01. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"21"
+		{
+			"label"	"Black Mesa East (2/2)"
+			"command"	"map d1_eli_02"
+			"description"	"Load d1_eli_02. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"22"
+		{
+			"label"	"We Don't Go To Ravenholm (1/7)"
+			"command"	"map d1_town_01"
+			"description"	"Load d1_town_01. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"23"
+		{
+			"label"	"We Don't Go To Ravenholm (2/7)"
+			"command"	"map d1_town_01a"
+			"description"	"Load d1_town_01a. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"24"
+		{
+			"label"	"We Don't Go To Ravenholm (3/7)"
+			"command"	"map d1_town_02"
+			"description"	"Load d1_town_02. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"25"
+		{
+			"label"	"We Don't Go To Ravenholm (4/7)"
+			"command"	"map d1_town_03"
+			"description"	"Load d1_town_03. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"26"
+		{
+			"label"	"We Don't Go To Ravenholm (5/7)"
+			"command"	"map d1_town_02a"
+			"description"	"Load d1_town_02a. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"27"
+		{
+			"label"	"We Don't Go To Ravenholm (6/7)"
+			"command"	"map d1_town_04"
+			"description"	"Load d1_town_04. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"28"
+		{
+			"label"	"We Don't Go To Ravenholm (7/7)"
+			"command"	"map d1_town_05"
+			"description"	"Load d1_town_05. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"29"
+		{
+			"label"	"Highway 17 (1/6)"
+			"command"	"map d2_coast_01"
+			"description"	"Load d2_coast_01. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"30"
+		{
+			"label"	"Highway 17 (2/6)"
+			"command"	"map d2_coast_03"
+			"description"	"Load d2_coast_03. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"31"
+		{
+			"label"	"Highway 17 (3/6)"
+			"command"	"map d2_coast_04"
+			"description"	"Load d2_coast_04. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"32"
+		{
+			"label"	"Highway 17 (4/6)"
+			"command"	"map d2_coast_05"
+			"description"	"Load d2_coast_05. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"33"
+		{
+			"label"	"Highway 17 (5/6)"
+			"command"	"map d2_coast_07"
+			"description"	"Load d2_coast_07. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"34"
+		{
+			"label"	"Highway 17 (6/6)"
+			"command"	"map d2_coast_08"
+			"description"	"Load d2_coast_08. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"35"
+		{
+			"label"	"Sandtraps (1/5)"
+			"command"	"map d2_coast_09"
+			"description"	"Load d2_coast_09. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"36"
+		{
+			"label"	"Sandtraps (2/5)"
+			"command"	"map d2_coast_10"
+			"description"	"Load d2_coast_10. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"37"
+		{
+			"label"	"Sandtraps (3/5)"
+			"command"	"map d2_coast_11"
+			"description"	"Load d2_coast_11. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"38"
+		{
+			"label"	"Sandtraps (4/5)"
+			"command"	"map d2_coast_12"
+			"description"	"Load d2_coast_12. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"39"
+		{
+			"label"	"Sandtraps (5/5)"
+			"command"	"map d2_prison_01"
+			"description"	"Load d2_prison_01. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"40"
+		{
+			"label"	"Nova Prospekt (1/4)"
+			"command"	"map d2_prison_02"
+			"description"	"Load d2_prison_02. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"41"
+		{
+			"label"	"Nova Prospekt (2/4)"
+			"command"	"map d2_prison_03"
+			"description"	"Load d2_prison_03. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"42"
+		{
+			"label"	"Nova Prospekt (3/4)"
+			"command"	"map d2_prison_04"
+			"description"	"Load d2_prison_04. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"43"
+		{
+			"label"	"Nova Prospekt (4/4)"
+			"command"	"map d2_prison_05"
+			"description"	"Load d2_prison_05. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"44"
+		{
+			"label"	"Entanglement (1/4)"
+			"command"	"map d2_prison_06"
+			"description"	"Load d2_prison_06. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"45"
+		{
+			"label"	"Entanglement (2/4)"
+			"command"	"map d2_prison_07"
+			"description"	"Load d2_prison_07. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"46"
+		{
+			"label"	"Entanglement (3/4)"
+			"command"	"map d2_prison_08"
+			"description"	"Load d2_prison_08. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"47"
+		{
+			"label"	"Entanglement (4/4)"
+			"command"	"map d3_c17_01"
+			"description"	"Load d3_c17_01. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"48"
+		{
+			"label"	"Anticitizen One (1/8)"
+			"command"	"map d3_c17_02"
+			"description"	"Load d3_c17_02. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"49"
+		{
+			"label"	"Anticitizen One (2/8)"
+			"command"	"map d3_c17_03"
+			"description"	"Load d3_c17_03. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"50"
+		{
+			"label"	"Anticitizen One (3/8)"
+			"command"	"map d3_c17_04"
+			"description"	"Load d3_c17_04. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"51"
+		{
+			"label"	"Anticitizen One (4/8)"
+			"command"	"map d3_c17_05"
+			"description"	"Load d3_c17_05. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"52"
+		{
+			"label"	"Anticitizen One (5/8)"
+			"command"	"map d3_c17_06a"
+			"description"	"Load d3_c17_06a. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"53"
+		{
+			"label"	"Anticitizen One (6/8)"
+			"command"	"map d3_c17_06b"
+			"description"	"Load d3_c17_06b. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"54"
+		{
+			"label"	"Anticitizen One (7/8)"
+			"command"	"map d3_c17_07"
+			"description"	"Load d3_c17_07. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"55"
+		{
+			"label"	"Anticitizen One (8/8)"
+			"command"	"map d3_c17_08"
+			"description"	"Load d3_c17_08. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"56"
+		{
+			"label"	"Follow Freeman! (1/7)"
+			"command"	"map d3_c17_09"
+			"description"	"Load d3_c17_09. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"57"
+		{
+			"label"	"Follow Freeman! (2/7)"
+			"command"	"map d3_c17_10a"
+			"description"	"Load d3_c17_10a. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"58"
+		{
+			"label"	"Follow Freeman! (3/7)"
+			"command"	"map d3_c17_10b"
+			"description"	"Load d3_c17_10b. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"59"
+		{
+			"label"	"Follow Freeman! (4/7)"
+			"command"	"map d3_c17_11"
+			"description"	"Load d3_c17_11. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"60"
+		{
+			"label"	"Follow Freeman! (5/7)"
+			"command"	"map d3_c17_12"
+			"description"	"Load d3_c17_12. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"61"
+		{
+			"label"	"Follow Freeman! (6/7)"
+			"command"	"map d3_c17_12b"
+			"description"	"Load d3_c17_12b. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"62"
+		{
+			"label"	"Follow Freeman! (7/7)"
+			"command"	"map d3_c17_13"
+			"description"	"Load d3_c17_13. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"63"
+		{
+			"label"	"Our Benefactors (1/4)"
+			"command"	"map d3_citadel_01"
+			"description"	"Load d3_citadel_01. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"64"
+		{
+			"label"	"Our Benefactors (2/4)"
+			"command"	"map d3_citadel_02"
+			"description"	"Load d3_citadel_02. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"65"
+		{
+			"label"	"Our Benefactors (3/4)"
+			"command"	"map d3_citadel_03"
+			"description"	"Load d3_citadel_03. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"66"
+		{
+			"label"	"Our Benefactors (4/4)"
+			"command"	"map d3_citadel_04"
+			"description"	"Load d3_citadel_04. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"67"
+		{
+			"label"	"Dark Energy (1/2)"
+			"command"	"map d3_citadel_05"
+			"description"	"Load d3_citadel_05. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+		"68"
+		{
+			"label"	"Dark Energy (2/2)"
+			"command"	"map d3_breen_01"
+			"description"	"Load d3_breen_01. Starts with no weapons or suit unless the map gives them; use Cheats > All weapons and ammo."
+		}
+	}
+	"Display"
+	{
+		"1"
+		{
+			"label"	"FPS counter"
+			"command"	"toggle cl_showfps"
+			"description"	"Frame-rate counter in the corner (on/off)."
+		}
+		"2"
+		{
+			"label"	"Position readout"
+			"command"	"toggle cl_showpos"
+			"description"	"Map position, angles and speed (on/off)."
+		}
+		"3"
+		{
+			"label"	"Field of view 90"
+			"command"	"fov_desired 90"
+			"description"	"Wider view (the highest Half-Life 2 allows)."
+		}
+		"4"
+		{
+			"label"	"Field of view 75"
+			"command"	"fov_desired 75"
+			"description"	"Half-Life 2's default."
+		}
+		"5"
+		{
+			"label"	"Brightness: darker"
+			"command"	"mat_monitorgamma 2.6"
+			"description"	"Darker picture."
+		}
+		"6"
+		{
+			"label"	"Brightness: default"
+			"command"	"mat_monitorgamma 2.2"
+			"description"	"Default picture."
+		}
+		"7"
+		{
+			"label"	"Brightness: brighter"
+			"command"	"mat_monitorgamma 1.8"
+			"description"	"Brighter picture."
+		}
+		"8"
+		{
+			"label"	"Motion blur"
+			"command"	"toggle mat_motion_blur_enabled"
+			"description"	"Camera motion blur (on/off)."
+		}
+		"9"
+		{
+			"label"	"Weapon model"
+			"command"	"toggle r_drawviewmodel"
+			"description"	"Show or hide the weapon in your hands."
+		}
+		"10"
+		{
+			"label"	"HUD"
+			"command"	"toggle cl_drawhud"
+			"description"	"Show or hide the whole HUD."
+		}
+		"11"
+		{
+			"label"	"Crosshair"
+			"command"	"toggle crosshair"
+			"description"	"Show or hide the crosshair."
+		}
+		"12"
+		{
+			"label"	"Subtitles"
+			"command"	"toggle cc_subtitles; closecaption 1"
+			"description"	"Dialogue subtitles (on/off)."
+		}
+		"13"
+		{
+			"label"	"Closed captions"
+			"command"	"toggle closecaption"
+			"description"	"Captions for dialogue and sound effects (on/off)."
+		}
+		"14"
+		{
+			"label"	"Frame-rate cap 60"
+			"command"	"fps_max 60"
+			"description"	"Limit to 60 fps (default)."
+		}
+		"15"
+		{
+			"label"	"Frame-rate cap 30"
+			"command"	"fps_max 30"
+			"description"	"Steadier 30 fps."
+		}
+	}
+	"Audio"
+	{
+		"1"
+		{
+			"label"	"Volume 100%"
+			"command"	"volume 1"
+			"description"	"Master volume."
+		}
+		"2"
+		{
+			"label"	"Volume 50%"
+			"command"	"volume 0.5"
+			"description"	"Master volume."
+		}
+		"3"
+		{
+			"label"	"Volume 20%"
+			"command"	"volume 0.2"
+			"description"	"Master volume."
+		}
+		"4"
+		{
+			"label"	"Music on"
+			"command"	"snd_musicvolume 1"
+			"description"	"Music volume full."
+		}
+		"5"
+		{
+			"label"	"Music off"
+			"command"	"snd_musicvolume 0"
+			"description"	"Mute the music."
+		}
+		"6"
+		{
+			"label"	"Stop all sounds"
+			"command"	"stopsound"
+			"description"	"Silences sounds currently playing."
+		}
+		"7"
+		{
+			"label"	"Restart audio"
+			"command"	"snd_restart"
+			"description"	"Restarts the sound system (if sound cuts out)."
+		}
+	}
+	"Controls"
+	{
+		"1"
+		{
+			"label"	"Weapon menu: pictures"
+			"command"	"hud_fastswitch 2"
+			"description"	"Hold L1 shows weapon pictures around the crosshair (default)."
+		}
+		"2"
+		{
+			"label"	"Weapon menu: quick"
+			"command"	"hud_fastswitch 1"
+			"description"	"Switch weapons instantly without the picture menu."
+		}
+		"3"
+		{
+			"label"	"Look speed: slow"
+			"command"	"joy_yawsensitivity -1.0; joy_pitchsensitivity 0.7"
+			"description"	"Slower right-stick look."
+		}
+		"4"
+		{
+			"label"	"Look speed: default"
+			"command"	"joy_yawsensitivity -1.5; joy_pitchsensitivity 1"
+			"description"	"Default right-stick look."
+		}
+		"5"
+		{
+			"label"	"Look speed: fast"
+			"command"	"joy_yawsensitivity -2.5; joy_pitchsensitivity 1.5"
+			"description"	"Faster right-stick look."
+		}
+		"6"
+		{
+			"label"	"Invert look"
+			"command"	"joy_inverty 1"
+			"description"	"Push up to look down."
+		}
+		"7"
+		{
+			"label"	"Normal look"
+			"command"	"joy_inverty 0"
+			"description"	"Push up to look up."
+		}
+		"8"
+		{
+			"label"	"Menu pointer speed: slow"
+			"command"	"ps5_menu_cursor_speed 900"
+			"description"	"Slower menu pointer."
+		}
+		"9"
+		{
+			"label"	"Menu pointer speed: default"
+			"command"	"ps5_menu_cursor_speed 1400"
+			"description"	"Default menu pointer."
+		}
+		"10"
+		{
+			"label"	"Menu pointer speed: fast"
+			"command"	"ps5_menu_cursor_speed 2200"
+			"description"	"Faster menu pointer."
+		}
+		"11"
+		{
+			"label"	"Reload controller layout"
+			"command"	"exec 360controller.cfg"
+			"description"	"Restore the PS5 button layout."
+		}
+	}
+	"Troubleshooting"
+	{
+		"1"
+		{
+			"label"	"Hide developer messages"
+			"command"	"developer 0; con_drawnotify 0"
+			"description"	"Stop drawing developer messages over the game (shown when args.txt has -dev 2)."
+		}
+		"2"
+		{
+			"label"	"Show developer messages"
+			"command"	"developer 2; con_drawnotify 1"
+			"description"	"Developer messages drawn at the top-left again, as with -dev 2."
+		}
+		"3"
+		{
+			"label"	"Live screens: moving picture (default)"
+			"command"	"cl_drawmonitors 1"
+			"description"	"Live camera screens on. They can freeze the game in Barney's and Kleiner's rooms; the tests below help find why."
+		}
+		"4"
+		{
+			"label"	"Live screens: still picture"
+			"command"	"cl_drawmonitors 0"
+			"description"	"Monitors keep showing a picture but it no longer updates, so characters on them do not move. The setting that made the freeze rarer."
+		}
+		"5"
+		{
+			"label"	"Eye shine: texture (default)"
+			"command"	"r_glint_procedural 1"
+			"description"	"Eye reflections drawn by texture upload (the PS5 default)."
+		}
+		"6"
+		{
+			"label"	"Eye shine: render target"
+			"command"	"r_glint_procedural 0"
+			"description"	"Source's usual eye reflections. May cause white eyes or freezes on PS5."
+		}
+		"7"
+		{
+			"label"	"Save console to file"
+			"command"	"condump"
+			"description"	"Writes the console text to condumpNNN.txt in the app's data."
+		}
+		"8"
+		{
+			"label"	"Show engine version"
+			"command"	"version"
+			"description"	"Prints the engine version in the console."
+		}
+		"9"
+		{
+			"label"	"Clear console"
+			"command"	"clear"
+			"description"	"Empties the console."
+		}
+	}
+	"Developer tests"
+	{
+		"1"
+		{
+			"label"	"Freeze test: single-thread rendering"
+			"command"	"mat_queue_mode 0"
+			"description"	"Draw on the game's main thread instead of a separate render thread (may lower fps). Main freeze test."
+		}
+		"2"
+		{
+			"label"	"Multi-thread rendering (default)"
+			"command"	"mat_queue_mode -1"
+			"description"	"Normal: the engine decides, which on PS5 uses a separate render thread."
+		}
+		"3"
+		{
+			"label"	"Memory release fix on (default)"
+			"command"	"ps5_deferred_free 1"
+			"description"	"Free graphics memory only after the graphics chip has finished with it. Fix for the Barney/Kleiner freeze."
+		}
+		"4"
+		{
+			"label"	"Memory release fix off"
+			"command"	"ps5_deferred_free 0"
+			"description"	"Old behaviour: free graphics memory immediately (can freeze). For testing."
+		}
+		"5"
+		{
+			"label"	"Shader cache fix on (default)"
+			"command"	"ps5_shader_flush 1"
+			"description"	"Flush the graphics chip's caches the first times a newly built shader is used. Fix for the freeze when Kleiner/Barney appear."
+		}
+		"6"
+		{
+			"label"	"Shader cache fix: every draw"
+			"command"	"ps5_shader_flush 2"
+			"description"	"Flush shader caches on every draw (slower). Try this if the default still freezes."
+		}
+		"7"
+		{
+			"label"	"Shader cache fix off"
+			"command"	"ps5_shader_flush 0"
+			"description"	"Original behaviour (freezes sometimes, once per launch). For testing."
+		}
+		"8"
+		{
+			"label"	"Batch cache fix on"
+			"command"	"ps5_batch_flush 1"
+			"description"	"Every grouped draw flushes its own data caches instead of sharing one (a bit slower). Extra freeze test."
+		}
+		"9"
+		{
+			"label"	"Batch cache fix off (default)"
+			"command"	"ps5_batch_flush 0"
+			"description"	"Original grouped-draw behaviour."
+		}
+		"10"
+		{
+			"label"	"Monitor lock-step on"
+			"command"	"ps5_monitor_sync 1"
+			"description"	"When a security camera first starts, wait for the graphics chip on each draw for a moment. Did not stop the freeze; for testing."
+		}
+		"11"
+		{
+			"label"	"Freeze test: CPU frame copy on"
+			"command"	"ps5_cpu_present 1"
+			"description"	"Copy each finished frame to the screen with the CPU instead of the graphics chip (lower fps). Freeze test."
+		}
+		"12"
+		{
+			"label"	"Freeze test: CPU frame copy off (default)"
+			"command"	"ps5_cpu_present 0"
+			"description"	"Normal: the graphics chip copies each frame to the screen."
+		}
+		"13"
+		{
+			"label"	"Freeze test: CPU frame flip on"
+			"command"	"ps5_cpu_flip 1"
+			"description"	"Wait for the graphics chip to finish each frame, then show it (slightly lower fps). Freeze test."
+		}
+		"14"
+		{
+			"label"	"Freeze test: CPU frame flip off (default)"
+			"command"	"ps5_cpu_flip 0"
+			"description"	"Normal: the frame is shown as soon as the graphics chip reaches it."
+		}
+		"15"
+		{
+			"label"	"Freeze test: all CPU screen copies on"
+			"command"	"ps5_cpu_blits 1"
+			"description"	"Every screen copy (frame, water/glass refraction, effects) done by the CPU (much lower fps). Freeze test."
+		}
+		"16"
+		{
+			"label"	"Freeze test: all CPU screen copies off (default)"
+			"command"	"ps5_cpu_blits 0"
+			"description"	"Normal: the graphics chip does screen copies."
+		}
+		"17"
+		{
+			"label"	"Monitor lock-step long"
+			"command"	"ps5_monitor_sync 2"
+			"description"	"When a security camera first starts, wait for the graphics chip after every draw for about a minute (slow while it lasts). Freeze test."
+		}
+		"18"
+		{
+			"label"	"Monitor lock-step off (default)"
+			"command"	"ps5_monitor_sync 0"
+			"description"	"No waiting when a monitor camera starts."
+		}
+		"19"
+		{
+			"label"	"Freeze fix test: hide monitor overlay"
+			"command"	"ps5_skip_material dev/dev_prisontvoverlay"
+			"description"	"Hide the TV overlay drawn on top of security monitors (the last thing drawn before every freeze). The live picture stays."
+		}
+		"20"
+		{
+			"label"	"Freeze fix test: draw monitor overlay"
+			"command"	"ps5_skip_material"
+			"description"	"Draw the monitor overlay again."
+		}
+		"21"
+		{
+			"label"	"Freeze finder: lock-step drawing ON"
+			"command"	"ps5_sync_draws 1"
+			"description"	"Slow: waits for the graphics chip after every draw, so a freeze stops on the exact draw that causes it. Turn on just before Barney's room, wait 10 s after a freeze, then send the next launch's log."
+		}
+		"22"
+		{
+			"label"	"Freeze finder: lock-step drawing off"
+			"command"	"ps5_sync_draws 0"
+			"description"	"Normal speed again."
+		}
+		"23"
+		{
+			"label"	"Monitor test A: no eyes"
+			"command"	"cl_drawmonitors 1; r_eyes 0"
+			"description"	"Screens on, characters' eyes not drawn. Run near Barney's screen: does it still freeze?"
+		}
+		"24"
+		{
+			"label"	"Monitor test B: no face animation"
+			"command"	"cl_drawmonitors 1; r_eyes 1; r_flex 0"
+			"description"	"Screens on, eyes back, facial animation off. Does it still freeze?"
+		}
+		"25"
+		{
+			"label"	"Monitor test C: no 3D skybox"
+			"command"	"cl_drawmonitors 1; r_eyes 1; r_flex 1; r_3dsky 0"
+			"description"	"Screens on, distant 3D skybox off. Does it still freeze?"
+		}
+		"26"
+		{
+			"label"	"Monitor test D: no characters"
+			"command"	"sv_cheats 1; cl_drawmonitors 1; r_eyes 1; r_flex 1; r_3dsky 1; r_drawothermodels 0"
+			"description"	"Screens on, no models drawn anywhere (cheat). Does it still freeze?"
+		}
+		"27"
+		{
+			"label"	"Freeze test: skip monitor shader"
+			"command"	"ps5_skip_shader unlittwotexture"
+			"description"	"Don't draw surfaces using the UnlitTwoTexture shader (the security monitors). If the freeze stops, that confirms the cause."
+		}
+		"28"
+		{
+			"label"	"Clear camera picture now"
+			"command"	"ps5_camera_rt_clear"
+			"description"	"Give the monitors' camera picture defined contents (test; off by default)."
+		}
+		"29"
+		{
+			"label"	"Freeze test: draw everything"
+			"command"	"ps5_skip_shader"
+			"description"	"Undo the skip test (draw all shaders again)."
+		}
+		"30"
+		{
+			"label"	"Teleport guard on"
+			"command"	"ps5_model_guard 1"
+			"description"	"Don't draw a character on the frame it is teleported, or with broken bone data. Prevents the Kleiner/Barney teleport freeze."
+		}
+		"31"
+		{
+			"label"	"Teleport guard off (default)"
+			"command"	"ps5_model_guard 0"
+			"description"	"Draw every model every frame (the original behaviour)."
+		}
+		"32"
+		{
+			"label"	"Character test E: software skinning"
+			"command"	"sv_cheats 1; mat_softwareskin 1"
+			"description"	"Bend character models on the CPU instead of the GPU. Does the freeze stop?"
+		}
+		"33"
+		{
+			"label"	"Character test F: no shadows"
+			"command"	"mat_softwareskin 0; r_shadows 0"
+			"description"	"Characters and objects without their soft shadows. Does the freeze stop?"
+		}
+		"34"
+		{
+			"label"	"Character test G: no teeth/mouths"
+			"command"	"r_shadows 1; r_teeth 0"
+			"description"	"Characters drawn without teeth. Does the freeze stop?"
+		}
+		"35"
+		{
+			"label"	"Character test H: no see-through parts"
+			"command"	"sv_cheats 1; r_teeth 1; r_drawtranslucentrenderables 0"
+			"description"	"Skip glass, glasses and other see-through parts. Does the freeze stop?"
+		}
+		"36"
+		{
+			"label"	"Character tests: reset"
+			"command"	"mat_softwareskin 0; r_shadows 1; r_teeth 1; r_drawtranslucentrenderables 1"
+			"description"	"Undo the character tests."
+		}
+		"37"
+		{
+			"label"	"Monitor tests: reset"
+			"command"	"r_eyes 1; r_flex 1; r_3dsky 1; r_drawothermodels 1"
+			"description"	"Undo the monitor tests."
+		}
+		"38"
+		{
+			"label"	"Freeze recorder on"
+			"command"	"ps5_freeze_recorder 1"
+			"description"	"Record every draw to crumbs.bin so the next launch can report a freeze (costs some fps). Also: -ps5_freeze_recorder in args.txt."
+		}
+		"39"
+		{
+			"label"	"Freeze recorder off (default)"
+			"command"	"ps5_freeze_recorder 0"
+			"description"	"Stop recording draws."
+		}
+	}
+}

@@ -65,10 +65,20 @@ index 196bd80..563f988 100644
  	FileSystem_AddSearchPath_Platform( fsInfo.m_pFileSystem, steamInfo.m_GameInfoPath );
  	Q_strncpy( m_pGameInfoPath, steamInfo.m_GameInfoPath, sizeof(m_pGameInfoPath) );
 diff --git a/appframework/sdlmgr.cpp b/appframework/sdlmgr.cpp
-index 53ca92d..74d9fd6 100644
+index 53ca92d..a281776 100644
 --- a/appframework/sdlmgr.cpp
 +++ b/appframework/sdlmgr.cpp
-@@ -814,6 +814,12 @@ bool CSDLMgr::CreateHiddenGameWindow( const char *pTitle, int width, int height
+@@ -7,6 +7,9 @@
+ #ifdef USE_SDL
+ #include "SDL.h"
+ #include "SDL_opengl.h"
++#include <math.h>
++#include <time.h>
++#include <stdlib.h>
+ #endif
+ 
+ #include "appframework/ilaunchermgr.h"
+@@ -814,6 +817,12 @@ bool CSDLMgr::CreateHiddenGameWindow( const char *pTitle, int width, int height
  	// no window yet? Create one now!
  	m_nWindowRefCount = 1;
  
@@ -81,6 +91,278 @@ index 53ca92d..74d9fd6 100644
  	int x = SDL_WINDOWPOS_CENTERED;
  	int y = SDL_WINDOWPOS_CENTERED;
  	int flags = SDL_WINDOW_HIDDEN;
+@@ -1740,10 +1749,271 @@ void CSDLMgr::handleKeyInput( const SDL_Event &event )
+ 	PostEvent( theEvent, debug );
+ }
+ 
++#ifdef PLATFORM_PS5
++//-----------------------------------------------------------------------------
++// PS5: controller-driven mouse for the PC menus. HL2's GameUI dialogs (New
++// Game, Options, Load) are mouse-driven, so while vgui shows the cursor the
++// DualSense acts as a mouse: left stick moves the pointer, Cross clicks,
++// right stick scrolls, Circle sends Escape. These controller events are kept
++// from the game's input while the cursor is up; the D-pad still moves focus.
++//-----------------------------------------------------------------------------
++extern "C" {
++int SDL_SendMouseMotion( SDL_Window *window, Uint32 mouseID, int relative, int x, int y );
++int SDL_SendMouseButton( SDL_Window *window, Uint32 mouseID, Uint8 state, Uint8 button );
++int SDL_SendMouseWheel( SDL_Window *window, Uint32 mouseID, float x, float y, SDL_MouseWheelDirection direction );
++int SDL_SendKeyboardKey( Uint8 state, SDL_Scancode scancode );
++void zmr_hid_poll( SDL_Window *window );
++void zmr_input_controller_used( void );
++int zmr_osk_open( void );
++void zmr_toggle_console( void );
++void zmr_request_command_menu( void );
++}
++
++static ConVar ps5_menu_cursor( "ps5_menu_cursor", "1", FCVAR_ARCHIVE, "PS5: control the menu mouse pointer with the controller" );
++static ConVar ps5_menu_cursor_speed( "ps5_menu_cursor_speed", "1400", FCVAR_ARCHIVE, "PS5: menu pointer speed in pixels per second at full stick" );
++
++static bool s_bPS5MenuCursor = false;
++static int s_nPS5PendingButtons[16];	// queued presses/releases: +1/-1 left click, +2/-2 Escape
++static int s_nPS5Pending = 0;
++static Sint16 s_nPS5Axis[SDL_CONTROLLER_AXIS_MAX];	// last stick values seen in events
++// Last input wins: after the left stick moves the pointer, Cross clicks where
++// the pointer is; after the D-pad moves focus, Cross presses the focused item.
++static bool s_bPS5PointerActive = false;
++static bool s_bPS5CrossToMouse = false;	// route of the Cross press in progress
++
++static int PS5MenuEventFilter( void *, SDL_Event *e )
++{
++	if ( e->type == SDL_CONTROLLERAXISMOTION && e->caxis.axis < SDL_CONTROLLER_AXIS_MAX )
++	{
++		s_nPS5Axis[e->caxis.axis] = e->caxis.value;
++		if ( abs( e->caxis.value ) > 16000 )	// a real push, not stick drift
++			zmr_input_controller_used();
++	}
++	else if ( e->type == SDL_CONTROLLERBUTTONDOWN )
++		zmr_input_controller_used();
++	if ( !s_bPS5MenuCursor )
++		return 1;
++	if ( e->type == SDL_CONTROLLERBUTTONDOWN || e->type == SDL_CONTROLLERBUTTONUP )
++	{
++		const bool bDown = ( e->type == SDL_CONTROLLERBUTTONDOWN );
++		int code = 0;
++		switch ( e->cbutton.button )
++		{
++		case SDL_CONTROLLER_BUTTON_DPAD_UP:
++		case SDL_CONTROLLER_BUTTON_DPAD_DOWN:
++		case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
++		case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:
++			if ( bDown )
++				s_bPS5PointerActive = false;
++			return 1;
++		case SDL_CONTROLLER_BUTTON_A:
++			if ( bDown )
++				s_bPS5CrossToMouse = s_bPS5PointerActive;
++			if ( !s_bPS5CrossToMouse )
++				return 1;	// focus navigation: let vgui see Cross
++			code = 1;
++			break;
++		case SDL_CONTROLLER_BUTTON_B:
++			code = 2;
++			break;
++		case SDL_CONTROLLER_BUTTON_Y:	// Triangle: system on-screen keyboard
++			code = 3;
++			break;
++		case SDL_CONTROLLER_BUTTON_X:	// Square: developer console
++			code = 4;
++			break;
++		default:
++			return 1;
++		}
++		if ( s_nPS5Pending < 16 )
++			s_nPS5PendingButtons[s_nPS5Pending++] = ( e->type == SDL_CONTROLLERBUTTONDOWN ) ? code : -code;
++		if ( code >= 3 && e->type == SDL_CONTROLLERBUTTONDOWN )
++			printf( "[zmr] menu button %s\n", code == 3 ? "Triangle (command menu)" : "Square (console)" );
++		return 0;
++	}
++	if ( e->type == SDL_CONTROLLERAXISMOTION &&
++		 ( e->caxis.axis == SDL_CONTROLLER_AXIS_LEFTX || e->caxis.axis == SDL_CONTROLLER_AXIS_LEFTY ||
++		   e->caxis.axis == SDL_CONTROLLER_AXIS_RIGHTX || e->caxis.axis == SDL_CONTROLLER_AXIS_RIGHTY ) )
++		return 0;
++	return 1;
++}
++
++static float PS5StickCurve( Sint16 raw )
++{
++	const float dz = 0.18f;
++	float v = raw / 32767.0f;
++	float a = fabsf( v );
++	if ( a < dz )
++		return 0.0f;
++	a = ( a - dz ) / ( 1.0f - dz );
++	if ( a > 1.0f ) a = 1.0f;
++	return ( v < 0 ? -1.0f : 1.0f ) * a * a;
++}
++
++static Sint16 PS5Axis( SDL_GameController *pad, SDL_GameControllerAxis a )
++{
++	Sint16 v = s_nPS5Axis[a];
++	if ( pad )
++	{
++		Sint16 p = SDL_GameControllerGetAxis( pad, a );
++		if ( abs( p ) > abs( v ) ) v = p;
++	}
++	return v;
++}
++
++static void PS5UpdateMenuCursor( SDL_Window *pWindow, bool bCursorVisible )
++{
++	static bool s_bInstalled = false;
++	static SDL_GameController *s_pPad = NULL;
++	static Uint64 s_nLast = 0;
++	static float s_flX = -1, s_flY = -1, s_flWheel = 0;
++	static bool s_bClickHeld = false, s_bEscHeld = false;
++
++	if ( !s_bInstalled )
++	{
++		// SDL_SetEventFilter() discards every queued event, which would lose
++		// the window's initial focus event and leave the engine thinking it is
++		// in the background (muted sound, throttled frame rate). Save the
++		// queue and put it back afterwards.
++		static SDL_Event s_saved[256];
++		int n = SDL_PeepEvents( s_saved, 256, SDL_GETEVENT, SDL_FIRSTEVENT, SDL_LASTEVENT );
++		SDL_SetEventFilter( PS5MenuEventFilter, NULL );
++		if ( n > 0 )
++			SDL_PeepEvents( s_saved, n, SDL_ADDEVENT, SDL_FIRSTEVENT, SDL_LASTEVENT );
++		printf( "[zmr] menu pointer filter installed (%d queued events kept)\n", n > 0 ? n : 0 );
++		s_bInstalled = true;
++	}
++	if ( s_pPad && !SDL_GameControllerGetAttached( s_pPad ) )
++	{
++		SDL_GameControllerClose( s_pPad );
++		s_pPad = NULL;
++	}
++	if ( !s_pPad )
++	{
++		for ( int i = 0; i < SDL_NumJoysticks(); ++i )
++			if ( SDL_IsGameController( i ) && ( s_pPad = SDL_GameControllerOpen( i ) ) )
++				break;
++	}
++
++	struct timespec ts;
++	clock_gettime( CLOCK_MONOTONIC, &ts );
++	Uint64 now = (Uint64)ts.tv_sec * 1000000000ull + ts.tv_nsec;
++	float dt = s_nLast ? (float)( ( now - s_nLast ) * 1e-9 ) : 0.0f;
++	s_nLast = now;
++	if ( dt > 0.1f ) dt = 0.1f;
++
++	const bool bWas = s_bPS5MenuCursor;
++	s_bPS5MenuCursor = bCursorVisible && pWindow && ps5_menu_cursor.GetBool();
++	if ( bWas != s_bPS5MenuCursor )
++		printf( "[zmr] menu pointer %s (pad %p, window %p)\n", s_bPS5MenuCursor ? "on" : "off", (void *)s_pPad, (void *)pWindow );
++
++	if ( bWas && !s_bPS5MenuCursor )
++	{
++		// Leaving the menu: let go of anything we hold and hand the game the
++		// sticks' current positions, since their events were filtered.
++		if ( s_bClickHeld && pWindow ) SDL_SendMouseButton( pWindow, 0, SDL_RELEASED, SDL_BUTTON_LEFT );
++		if ( s_bEscHeld ) SDL_SendKeyboardKey( SDL_RELEASED, SDL_SCANCODE_ESCAPE );
++		s_bClickHeld = s_bEscHeld = false;
++		s_nPS5Pending = 0;
++		if ( s_pPad )
++		{
++			SDL_JoystickID id = SDL_JoystickInstanceID( SDL_GameControllerGetJoystick( s_pPad ) );
++			for ( int a = SDL_CONTROLLER_AXIS_LEFTX; a <= SDL_CONTROLLER_AXIS_RIGHTY; ++a )
++			{
++				SDL_Event ev;
++				memset( &ev, 0, sizeof( ev ) );
++				ev.type = SDL_CONTROLLERAXISMOTION;
++				ev.caxis.timestamp = SDL_GetTicks();
++				ev.caxis.which = id;
++				ev.caxis.axis = (Uint8)a;
++				ev.caxis.value = SDL_GameControllerGetAxis( s_pPad, (SDL_GameControllerAxis)a );
++				SDL_PushEvent( &ev );
++			}
++		}
++	}
++	if ( !s_bPS5MenuCursor )
++		return;
++
++	int w = 0, h = 0;
++	SDL_GetWindowSize( pWindow, &w, &h );
++	if ( w <= 0 || h <= 0 ) { w = 1920; h = 1080; }
++	bool bMoved = false;
++	if ( !bWas || s_flX < 0 )
++	{
++		if ( s_flX < 0 ) { s_flX = w * 0.5f; s_flY = h * 0.5f; }
++		bMoved = true;
++	}
++
++	// A USB mouse may have moved the pointer since our last update.
++	static int s_nSentX = -1, s_nSentY = -1;
++	{
++		int qx = 0, qy = 0;
++		SDL_GetMouseState( &qx, &qy );
++		if ( s_nSentX >= 0 && ( qx != s_nSentX || qy != s_nSentY ) )
++		{
++			s_flX = (float)qx; s_flY = (float)qy;
++			s_nSentX = qx; s_nSentY = qy;
++			s_bPS5PointerActive = true;
++		}
++	}
++
++	const float speed = ps5_menu_cursor_speed.GetFloat();
++	float mx = PS5StickCurve( PS5Axis( s_pPad, SDL_CONTROLLER_AXIS_LEFTX ) );
++	float my = PS5StickCurve( PS5Axis( s_pPad, SDL_CONTROLLER_AXIS_LEFTY ) );
++	if ( mx != 0.0f || my != 0.0f )
++	{
++		s_flX = clamp( s_flX + mx * speed * dt, 0.0f, (float)( w - 1 ) );
++		s_flY = clamp( s_flY + my * speed * dt, 0.0f, (float)( h - 1 ) );
++		bMoved = true;
++		s_bPS5PointerActive = true;
++	}
++	if ( bMoved )
++	{
++		SDL_SendMouseMotion( pWindow, 0, 0, (int)s_flX, (int)s_flY );
++		s_nSentX = (int)s_flX; s_nSentY = (int)s_flY;
++	}
++	else if ( s_nSentX < 0 )
++	{
++		s_nSentX = (int)s_flX; s_nSentY = (int)s_flY;
++	}
++	static int s_nDiag = 0;
++	if ( ( mx != 0.0f || my != 0.0f ) && s_nDiag < 5 )
++	{
++		++s_nDiag;
++		int qx = 0, qy = 0;
++		SDL_GetMouseState( &qx, &qy );
++		printf( "[zmr] menu pointer move dt=%.4f stick=%d,%d -> %.0f,%.0f (SDL mouse %d,%d, window %dx%d)\n",
++			dt, s_nPS5Axis[0], s_nPS5Axis[1], s_flX, s_flY, qx, qy, w, h );
++	}
++
++	// Right stick: scroll wheel (about 12 notches per second at full tilt).
++	s_flWheel += -PS5StickCurve( PS5Axis( s_pPad, SDL_CONTROLLER_AXIS_RIGHTY ) ) * 12.0f * dt;
++	while ( s_flWheel >= 1.0f ) { SDL_SendMouseWheel( pWindow, 0, 0, 1, SDL_MOUSEWHEEL_NORMAL ); s_flWheel -= 1.0f; }
++	while ( s_flWheel <= -1.0f ) { SDL_SendMouseWheel( pWindow, 0, 0, -1, SDL_MOUSEWHEEL_NORMAL ); s_flWheel += 1.0f; }
++
++	for ( int i = 0; i < s_nPS5Pending; ++i )
++	{
++		int c = s_nPS5PendingButtons[i];
++		if ( c == 1 && !s_bClickHeld )      { SDL_SendMouseButton( pWindow, 0, SDL_PRESSED, SDL_BUTTON_LEFT ); s_bClickHeld = true; }
++		else if ( c == -1 && s_bClickHeld ) { SDL_SendMouseButton( pWindow, 0, SDL_RELEASED, SDL_BUTTON_LEFT ); s_bClickHeld = false; }
++		else if ( c == 2 && !s_bEscHeld )   { SDL_SendKeyboardKey( SDL_PRESSED, SDL_SCANCODE_ESCAPE ); s_bEscHeld = true; }
++		else if ( c == -2 && s_bEscHeld )   { SDL_SendKeyboardKey( SDL_RELEASED, SDL_SCANCODE_ESCAPE ); s_bEscHeld = false; }
++		else if ( c == 3 )                  { zmr_request_command_menu(); }
++		else if ( c == 4 )                  { zmr_toggle_console(); }
++	}
++	s_nPS5Pending = 0;
++}
++#endif // PLATFORM_PS5
++
+ void CSDLMgr::PumpWindowsMessageLoop()
+ {
+ 	SDLAPP_FUNC;
+ 
++#ifdef PLATFORM_PS5
++	SDL_PumpEvents();
++	zmr_hid_poll( m_Window );	// USB keyboard and mouse (ps5/runtime/zmr_hid.c)
++	PS5UpdateMenuCursor( m_Window, m_bCursorVisible );
++#endif
+ 	SDL_Event event;
+ 	int nEventsProcessed = 0;
+ 	while ( SDL_PollEvent(&event) && nEventsProcessed < 100 )
 diff --git a/engine/audio/snd_dev_sdl.cpp b/engine/audio/snd_dev_sdl.cpp
 index 9e03c52..02af6ed 100644
 --- a/engine/audio/snd_dev_sdl.cpp
@@ -98,6 +380,66 @@ index 9e03c52..02af6ed 100644
  
  	if (!m_devId)
  		SDLAUDIO_FAIL("SDL_OpenAudioDevice()");
+diff --git a/engine/host.cpp b/engine/host.cpp
+index dbd43c6..df07dcb 100644
+--- a/engine/host.cpp
++++ b/engine/host.cpp
+@@ -2621,8 +2621,15 @@ Runs all active servers
+ ==================
+ */
+ 
++#ifdef PLATFORM_PS5
++extern "C" void zmr_crumb_note( const char *what, unsigned a, unsigned b );
++#define PS5_FRAME_NOTE( w ) zmr_crumb_note( w, 0, 0 )
++#else
++#define PS5_FRAME_NOTE( w ) ((void)0)
++#endif
+ void _Host_RunFrame_Input( float accumulated_extra_samples, bool bFinalTick )
+ {
++	PS5_FRAME_NOTE( "frame: input" );
+ 	VPROF_BUDGET( "_Host_RunFrame_Input", _T("Input") );
+ 
+ 	// Run a test script?
+@@ -2663,6 +2670,7 @@ void _Host_RunFrame_Input( float accumulated_extra_samples, bool bFinalTick )
+ 
+ void _Host_RunFrame_Server( bool finaltick )
+ {
++	PS5_FRAME_NOTE( "frame: server" );
+ 	VPROF_BUDGET( "_Host_RunFrame_Server", VPROF_BUDGETGROUP_GAME );
+ 	VPROF_INCREMENT_COUNTER( "ticks", 1 );
+ 	tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "%s", __FUNCTION__ );
+@@ -2692,6 +2700,7 @@ void _Host_RunFrame_Server_Async( int numticks )
+ 
+ void _Host_RunFrame_Client( bool framefinished )
+ {
++	PS5_FRAME_NOTE( "frame: client" );
+ #ifndef SWDS
+ 	VPROF( "_Host_RunFrame_Client" );
+ 	tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "%s %d", __FUNCTION__, framefinished );
+@@ -2761,6 +2770,7 @@ void CheckSpecialCheatVars()
+ 
+ void _Host_RunFrame_Render()
+ {
++	PS5_FRAME_NOTE( "frame: render" );
+ #ifndef SWDS
+ 	VPROF( "_Host_RunFrame_Render" );
+ 	tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "_Host_RunFrame_Render" );
+@@ -2908,6 +2918,7 @@ void CL_ApplyAddAngle()
+ 
+ void _Host_RunFrame_Sound()
+ {
++	PS5_FRAME_NOTE( "frame: sound" );
+ #ifndef SWDS
+ 
+ 	VPROF_BUDGET( "_Host_RunFrame_Sound", VPROF_BUDGETGROUP_OTHER_SOUND );
+@@ -3050,6 +3061,7 @@ extern ConVar sv_alternateticks;
+ 
+ void _Host_RunFrame (float time)
+ {
++	PS5_FRAME_NOTE( "frame: start" );
+ 	MDLCACHE_COARSE_LOCK_(g_pMDLCache);
+ 	static double host_remainder = 0.0f;
+ 	double prevremainder;
 diff --git a/engine/net_ws.cpp b/engine/net_ws.cpp
 index 6f3c656..bba33a1 100644
 --- a/engine/net_ws.cpp
@@ -152,6 +494,891 @@ index 4020131..d1c358b 100644
  	int mib[2] = { CTL_HW, HW_MEMSIZE };
  	u_int namelen = sizeof(mib) / sizeof(mib[0]);
  	size_t len = sizeof(memsize);
+diff --git a/engine/sys_mainwind.cpp b/engine/sys_mainwind.cpp
+index aecf5eb..0a98594 100644
+--- a/engine/sys_mainwind.cpp
++++ b/engine/sys_mainwind.cpp
+@@ -1750,6 +1750,10 @@ bool CGame::CanPostActivateEvents()
+ 
+ void CGame::SetActiveApp( bool active )
+ {
++#ifdef PLATFORM_PS5
++	if ( active != m_bActiveApp )
++		printf( "[zmr] app %s (sound %s)\n", active ? "active" : "inactive", active ? "on" : "muted when snd_mute_losefocus is 1" );
++#endif
+ 	m_bActiveApp = active;
+ }
+ 
+diff --git a/game/client/baseclientrendertargets.cpp b/game/client/baseclientrendertargets.cpp
+index 3aa642c..6c80d2e 100644
+--- a/game/client/baseclientrendertargets.cpp
++++ b/game/client/baseclientrendertargets.cpp
+@@ -40,7 +40,14 @@ ITexture* CBaseClientRenderTargets::CreateCameraTexture( IMaterialSystem* pMater
+ 		"_rt_Camera",
+ 		iSize, iSize, RT_SIZE_DEFAULT,
+ 		pMaterialSystem->GetBackBufferFormat(),
++#ifdef PLATFORM_PS5
++		// Own depth buffer of the same size: rendering the 256x256 camera view
++		// against the shared 1920x1080 depth buffer hangs the PS5's GPU on the
++		// first monitor render.
++		MATERIAL_RT_DEPTH_SEPARATE,
++#else
+ 		MATERIAL_RT_DEPTH_SHARED, 
++#endif
+ 		0,
+ 		CREATERENDERTARGETFLAGS_HDR );
+ }
+diff --git a/game/client/c_baseanimating.cpp b/game/client/c_baseanimating.cpp
+index d66339e..ff72b6f 100644
+--- a/game/client/c_baseanimating.cpp
++++ b/game/client/c_baseanimating.cpp
+@@ -3057,11 +3057,83 @@ ConVar r_drawothermodels( "r_drawothermodels", "1", FCVAR_CHEAT, "0=Off, 1=Norma
+ // Purpose: Draws the object
+ // Input  : flags - 
+ //-----------------------------------------------------------------------------
++#ifdef PLATFORM_PS5
++//-----------------------------------------------------------------------------
++// PS5: a character teleported into a scene can be drawn for one frame with
++// its body stretched between the old and new place (or with invalid bone
++// data), and drawing that hangs the PS5's GPU. Skip such frames.
++//-----------------------------------------------------------------------------
++static ConVar ps5_model_guard( "ps5_model_guard", "0", 0, "PS5: skip drawing models on teleport frames or with invalid bones (prevents a GPU hang)" );
++static Vector s_vecPS5LastOrigin[ MAX_EDICTS ];
++static int s_nPS5LastFrame[ MAX_EDICTS ];
++static int s_nPS5SkipFrame[ MAX_EDICTS ];
++
++static bool PS5MatrixOk( const matrix3x4_t &m, const Vector &origin )
++{
++	for ( int r = 0; r < 3; ++r )
++		for ( int c = 0; c < 4; ++c )
++			if ( !IsFinite( m[r][c] ) || fabsf( m[r][c] ) > 65536.0f )
++				return false;
++	Vector pos( m[0][3], m[1][3], m[2][3] );
++	return ( pos - origin ).LengthSqr() < 4096.0f * 4096.0f;
++}
++
++bool C_BaseAnimating::PS5SafeToDraw()
++{
++	if ( !ps5_model_guard.GetBool() )
++		return true;
++	const char *pszWhy = NULL;
++	const Vector &origin = GetRenderOrigin();
++	int idx = entindex();
++	if ( IsNoInterpolationFrame() )
++		pszWhy = "teleport frame";
++	else if ( idx > 0 && idx < MAX_EDICTS && s_nPS5SkipFrame[idx] == gpGlobals->framecount )
++		return false;	// already judged unsafe this frame (other views: shadow, monitor)
++	else if ( idx > 0 && idx < MAX_EDICTS )
++	{
++		if ( s_nPS5LastFrame[idx] >= gpGlobals->framecount - 2 && s_nPS5LastFrame[idx] != gpGlobals->framecount &&
++			 ( origin - s_vecPS5LastOrigin[idx] ).LengthSqr() > 512.0f * 512.0f )
++			pszWhy = "jumped";
++	}
++	if ( idx > 0 && idx < MAX_EDICTS )
++	{
++		s_vecPS5LastOrigin[idx] = origin;
++		s_nPS5LastFrame[idx] = gpGlobals->framecount;
++	}
++	if ( !pszWhy && GetModelPtr() && SetupBones( NULL, -1, BONE_USED_BY_ANYTHING, gpGlobals->curtime ) )
++	{
++		int n = m_CachedBoneData.Count();
++		for ( int i = 0; i < n; ++i )
++			if ( !PS5MatrixOk( m_CachedBoneData[i], origin ) )
++			{
++				pszWhy = "invalid bones";
++				break;
++			}
++	}
++	if ( !pszWhy )
++		return true;
++	if ( idx > 0 && idx < MAX_EDICTS )
++		s_nPS5SkipFrame[idx] = gpGlobals->framecount;
++	static int s_nLogged = 0;
++	if ( s_nLogged < 200 )
++	{
++		++s_nLogged;
++		const model_t *pModel = GetModel();
++		Msg( "[ps5-model] skipped %s (%s) at frame %d\n", pModel ? modelinfo->GetModelName( pModel ) : "?", pszWhy, gpGlobals->framecount );
++	}
++	return false;
++}
++#endif
++
+ int C_BaseAnimating::DrawModel( int flags )
+ {
+ 	VPROF_BUDGET( "C_BaseAnimating::DrawModel", VPROF_BUDGETGROUP_MODEL_RENDERING );
+ 	if ( !m_bReadyToDraw )
+ 		return 0;
++#ifdef PLATFORM_PS5
++	if ( !PS5SafeToDraw() )
++		return 0;
++#endif
+ 
+ 	int drawn = 0;
+ 
+diff --git a/game/client/c_baseanimating.h b/game/client/c_baseanimating.h
+index f91745e..e0fa0df 100644
+--- a/game/client/c_baseanimating.h
++++ b/game/client/c_baseanimating.h
+@@ -148,6 +148,9 @@ public:
+ 	virtual void CalculateIKLocks( float currentTime );
+ 	virtual bool ShouldDraw();
+ 	virtual int DrawModel( int flags );
++#ifdef PLATFORM_PS5
++	bool PS5SafeToDraw();
++#endif
+ 	virtual int	InternalDrawModel( int flags );
+ 	virtual bool OnInternalDrawModel( ClientModelRenderInfo_t *pInfo );
+ 	virtual bool OnPostInternalDrawModel( ClientModelRenderInfo_t *pInfo );
+diff --git a/game/client/cdll_util.cpp b/game/client/cdll_util.cpp
+index 4e87753..1f34bf1 100644
+--- a/game/client/cdll_util.cpp
++++ b/game/client/cdll_util.cpp
+@@ -892,6 +892,55 @@ const char * UTIL_SafeName( const char *oldName )
+ //			input buffer is assumed, or you can pass the size of the input buffer if
+ //			not NULL-terminated.
+ //-----------------------------------------------------------------------------
++#ifdef PLATFORM_PS5
++//-----------------------------------------------------------------------------
++// PS5: name the DualSense button bound to a command, for HUD hints. The PS5
++// layout binds some actions through toggle aliases, so map those too.
++//-----------------------------------------------------------------------------
++extern "C" int zmr_input_keyboard_last( void );	// ps5/runtime/zmr_hid.c
++
++const char *PS5ControllerKeyForBinding( const char *pBinding )
++{
++	// Playing on keyboard and mouse: let the hint name the keyboard key.
++	if ( zmr_input_keyboard_last() )
++		return NULL;
++
++	static const struct { ButtonCode_t code; const char *name; } s_Buttons[] =
++	{
++		{ KEY_XBUTTON_A, "CROSS" }, { KEY_XBUTTON_B, "CIRCLE" },
++		{ KEY_XBUTTON_X, "SQUARE" }, { KEY_XBUTTON_Y, "TRIANGLE" },
++		{ KEY_XBUTTON_LEFT_SHOULDER, "L1" }, { KEY_XBUTTON_RIGHT_SHOULDER, "R1" },
++		{ KEY_XBUTTON_LTRIGGER, "L2" }, { KEY_XBUTTON_RTRIGGER, "R2" },
++		{ KEY_XBUTTON_STICK1, "L3" }, { KEY_XBUTTON_STICK2, "R3" },
++		{ KEY_XBUTTON_UP, "D-PAD UP" }, { KEY_XBUTTON_DOWN, "D-PAD DOWN" },
++		{ KEY_XBUTTON_LEFT, "D-PAD LEFT" }, { KEY_XBUTTON_RIGHT, "D-PAD RIGHT" },
++		{ KEY_XBUTTON_BACK, "TOUCHPAD" }, { KEY_XBUTTON_START, "OPTIONS" },
++	};
++	static const struct { const char *cmd; const char *alias; } s_Aliases[] =
++	{
++		{ "speed", "sprint_toggle" }, { "duck", "duck_toggle" }, { "impulse 100", "flashlight_toggle" },
++	};
++	const char *pWanted[2] = { pBinding, NULL };
++	for ( int i = 0; i < ARRAYSIZE( s_Aliases ); ++i )
++		if ( !Q_stricmp( pBinding, s_Aliases[i].cmd ) )
++			pWanted[1] = s_Aliases[i].alias;
++	for ( int w = 0; w < 2 && pWanted[w]; ++w )
++	{
++		for ( int i = 0; i < ARRAYSIZE( s_Buttons ); ++i )
++		{
++			const char *b = engine->Key_BindingForKey( s_Buttons[i].code );
++			if ( !b || !b[0] )
++				continue;
++			if ( b[0] == '+' )
++				++b;
++			if ( !Q_stricmp( b, pWanted[w] ) )
++				return s_Buttons[i].name;
++		}
++	}
++	return NULL;
++}
++#endif
++
+ void UTIL_ReplaceKeyBindings( const wchar_t *inbuf, int inbufsizebytes, OUT_Z_BYTECAP(outbufsizebytes) wchar_t *outbuf, int outbufsizebytes )
+ {
+ 	Assert( outbufsizebytes >= sizeof(outbuf[0]) );
+@@ -928,7 +977,12 @@ void UTIL_ReplaceKeyBindings( const wchar_t *inbuf, int inbufsizebytes, OUT_Z_BY
+ 				char binding[64];
+ 				g_pVGuiLocalize->ConvertUnicodeToANSI( token, binding, sizeof(binding) );
+ 
+-				const char *key = engine->Key_LookupBinding( *binding == '+' ? binding + 1 : binding );
++				const char *key = NULL;
++#ifdef PLATFORM_PS5
++				key = PS5ControllerKeyForBinding( *binding == '+' ? binding + 1 : binding );
++				if ( !key )
++#endif
++				key = engine->Key_LookupBinding( *binding == '+' ? binding + 1 : binding );
+ 				if ( !key )
+ 				{
+ 					key = IsX360() ? "" : "< not bound >";
+@@ -1319,3 +1373,7 @@ bool UTIL_HasLoadedAnyMap()
+ 
+ 	return g_pFullFileSystem->FileExists( szFilename, "MOD" );
+ }
++
++#ifdef PLATFORM_PS5
++#include "ps5_commandmenu.inc"
++#endif
+diff --git a/game/client/hl2/hud_weaponselection.cpp b/game/client/hl2/hud_weaponselection.cpp
+index f560070..95a56d2 100644
+--- a/game/client/hl2/hud_weaponselection.cpp
++++ b/game/client/hl2/hud_weaponselection.cpp
+@@ -58,6 +58,14 @@ public:
+ 
+ 	virtual C_BaseCombatWeapon *GetWeaponInSlot( int iSlot, int iSlotPos );
+ 	virtual void SelectWeaponSlot( int iSlot );
++#ifdef PLATFORM_PS5
++	virtual void PS5SelectActiveWeapon( void )
++	{
++		C_BasePlayer *pPlayer = C_BasePlayer::GetLocalPlayer();
++		if ( pPlayer && pPlayer->GetActiveWeapon() && !GetSelectedWeapon() )
++			SetSelectedWeapon( pPlayer->GetActiveWeapon() );
++	}
++#endif
+ 
+ 	virtual C_BaseCombatWeapon	*GetSelectedWeapon( void )
+ 	{ 
+diff --git a/game/client/hud_hintdisplay.cpp b/game/client/hud_hintdisplay.cpp
+index 487633b..ac947f2 100644
+--- a/game/client/hud_hintdisplay.cpp
++++ b/game/client/hud_hintdisplay.cpp
+@@ -598,7 +598,13 @@ bool CHudHintKeyDisplay::SetHintText( const char *text )
+ 			}
+ 			else
+ 			{
+-				const char *key = engine->Key_LookupBinding( *binding == '+' ? binding + 1 : binding );
++				const char *key = NULL;
++#ifdef PLATFORM_PS5
++				extern const char *PS5ControllerKeyForBinding( const char *pBinding );
++				key = PS5ControllerKeyForBinding( *binding == '+' ? binding + 1 : binding );
++				if ( !key )
++#endif
++				key = engine->Key_LookupBinding( *binding == '+' ? binding + 1 : binding );
+ 				if ( !key )
+ 				{
+ 					key = "< not bound >";
+diff --git a/game/client/ps5_commandmenu.inc b/game/client/ps5_commandmenu.inc
+new file mode 100644
+index 0000000..de5836b
+--- /dev/null
++++ b/game/client/ps5_commandmenu.inc
+@@ -0,0 +1,495 @@
++//========= PS5 port: controller-friendly command menu ==========================
++//
++// Opened with Triangle while a menu is up (the PS5 runtime sets a request flag).
++// Categories on the left, their commands on the right with a description of
++// the highlighted one; Cross (or Run) runs it. The command line underneath
++// can be edited with a USB keyboard.
++//
++// The list comes from cfg/ps5_commands.txt (written by the launcher) plus the
++// player's own cfg/ps5_commands_custom.txt, shown as "My commands".
++//
++// A small hint in the menus' corner says which buttons open it.
++//
++// Included at the end of cdll_util.cpp (keeps the build's module lists as
++// they are).
++//===============================================================================
++#ifdef PLATFORM_PS5
++
++#include "tier0/memdbgoff.h"
++#include <vgui/IVGui.h>
++#include <vgui/ISurface.h>
++#include <vgui/IInput.h>
++#include <vgui/IScheme.h>
++#include <vgui_controls/Frame.h>
++#include <vgui_controls/ListPanel.h>
++#include <vgui_controls/Button.h>
++#include <vgui_controls/Label.h>
++#include <vgui_controls/TextEntry.h>
++#include "ienginevgui.h"
++#include "igamesystem.h"
++#include "filesystem.h"
++#include "tier0/memdbgon.h"
++
++extern "C" int zmr_take_command_menu_request( void );	// ps5/runtime/zmr_hid.c
++extern "C" int zmr_osk_open( void );
++extern "C" void zmr_set_skip_shader( const char *list );
++extern "C" void zmr_set_sync_draws( int on );
++extern "C" void zmr_set_skip_material( const char *list );
++CON_COMMAND( ps5_skip_material, "PS5: don't draw materials whose name contains any of these comma-separated fragments" )
++{
++	zmr_set_skip_material( args.ArgC() > 1 ? args.ArgS() : "" );
++}
++CON_COMMAND( ps5_sync_draws, "PS5: 1 = wait for the GPU after every draw (slow; pins down GPU hangs)" )
++{
++	zmr_set_sync_draws( args.ArgC() > 1 ? atoi( args[1] ) : 1 );
++}
++
++// GPU driver (src/platform/ps5_agc_native_runtime.c): cache-flush handling
++// for newly compiled shaders and for batched draws.
++extern "C" int ps5_gl_shader_acquire_mode;
++extern "C" int ps5_gl_keep_batch_acquires;
++extern "C" unsigned long ps5_gl_shader_acquire_count;
++CON_COMMAND( ps5_shader_flush, "PS5: GPU cache flush for new shaders. 0 = off, 1 = first draws (default), 2 = every draw" )
++{
++	if ( args.ArgC() > 1 )
++		ps5_gl_shader_acquire_mode = atoi( args[1] );
++	Msg( "[ps5] shader flush mode %d (%lu flushes so far)\n", ps5_gl_shader_acquire_mode, ps5_gl_shader_acquire_count );
++}
++extern "C" int ps5_gl_cpu_present_blit;
++extern "C" int ps5_gl_cpu_blits;
++CON_COMMAND( ps5_cpu_present, "PS5: 1 = copy each finished frame to the screen with the CPU instead of the GPU (freeze test, slower)" )
++{
++	if ( args.ArgC() > 1 )
++		ps5_gl_cpu_present_blit = atoi( args[1] );
++	Msg( "[ps5] CPU present copy %d\n", ps5_gl_cpu_present_blit );
++}
++extern "C" int ps5_gl_cpu_flip;
++CON_COMMAND( ps5_cpu_flip, "PS5: 1 = wait for the GPU to finish each frame, then show it from the CPU (freeze test)" )
++{
++	if ( args.ArgC() > 1 )
++		ps5_gl_cpu_flip = atoi( args[1] );
++	Msg( "[ps5] CPU flip %d\n", ps5_gl_cpu_flip );
++}
++extern "C" void zmr_crumbs_enable( int on );
++CON_COMMAND( ps5_freeze_recorder, "PS5: 1 = record every draw to crumbs.bin so the next launch can report a freeze" )
++{
++	zmr_crumbs_enable( args.ArgC() > 1 ? atoi( args[1] ) : 1 );
++}
++extern "C" int ps5_gl_deferred_free;
++extern "C" unsigned long ps5_gl_deferred_free_peak;
++CON_COMMAND( ps5_deferred_free, "PS5: 1 = free GPU memory only after the GPU finished using it (default; freeze fix). 0 = free at once" )
++{
++	if ( args.ArgC() > 1 )
++		ps5_gl_deferred_free = atoi( args[1] );
++	Msg( "[ps5] deferred GPU memory release %d (most waiting at once: %lu)\n", ps5_gl_deferred_free, ps5_gl_deferred_free_peak );
++}
++CON_COMMAND( ps5_cpu_blits, "PS5: 1 = do every screen copy (present, refraction, effects) with the CPU (freeze test, slower)" )
++{
++	if ( args.ArgC() > 1 )
++		ps5_gl_cpu_blits = atoi( args[1] );
++	Msg( "[ps5] CPU screen copies %d\n", ps5_gl_cpu_blits );
++}
++CON_COMMAND( ps5_batch_flush, "PS5: 1 = every batched draw keeps its own GPU cache flush" )
++{
++	if ( args.ArgC() > 1 )
++		ps5_gl_keep_batch_acquires = atoi( args[1] );
++	Msg( "[ps5] batch flush %d\n", ps5_gl_keep_batch_acquires );
++}
++
++// ps5_skip_shader "name1,name2": don't draw anything using shaders whose name
++// contains one of these (diagnosing GPU hangs; empty to draw everything).
++CON_COMMAND( ps5_skip_shader, "PS5: skip draws using shaders whose name contains any of these comma-separated fragments" )
++{
++	zmr_set_skip_shader( args.ArgC() > 1 ? args.ArgS() : "" );
++}
++
++static bool s_bPS5WeaponMenuHeld;
++static void PS5WeaponMenuKeepOpen();
++
++// A list that hands D-pad left/right to its parent (to switch between the
++// category and command lists) instead of using them for cell selection.
++class CPS5MenuList : public vgui::ListPanel
++{
++	DECLARE_CLASS_SIMPLE( CPS5MenuList, vgui::ListPanel );
++public:
++	CPS5MenuList( vgui::Panel *parent, const char *name ) : BaseClass( parent, name ) {}
++	void OnKeyCodePressed( vgui::KeyCode code ) OVERRIDE
++	{
++		vgui::KeyCode base = GetBaseButtonCode( code );
++		if ( base == KEY_XBUTTON_LEFT || base == KEY_XBUTTON_RIGHT || base == KEY_LEFT || base == KEY_RIGHT ||
++			 base == KEY_XBUTTON_B || base == KEY_ESCAPE )
++		{
++			CallParentFunction( new KeyValues( "KeyCodePressed", "code", code ) );
++			return;
++		}
++		BaseClass::OnKeyCodePressed( code );
++	}
++};
++
++class CPS5CommandMenu : public vgui::Frame
++{
++	DECLARE_CLASS_SIMPLE( CPS5CommandMenu, vgui::Frame );
++public:
++	CPS5CommandMenu( vgui::VPANEL parent ) : BaseClass( NULL, "PS5CommandMenu" ), m_pData( NULL )
++	{
++		SetParent( parent );
++		SetTitle( "Commands", false );
++		SetSizeable( false );
++		SetMoveable( true );
++		SetDeleteSelfOnClose( false );
++		SetProportional( false );
++
++		m_pCats = new CPS5MenuList( this, "Categories" );
++		m_pCats->AddColumnHeader( 0, "name", "Category", 250, 0 );
++		m_pCats->SetMultiselectEnabled( false );
++		m_pCats->AddActionSignalTarget( this );
++
++		m_pList = new CPS5MenuList( this, "List" );
++		m_pList->AddColumnHeader( 0, "label", "Command", 360, 0 );
++		m_pList->AddColumnHeader( 1, "command", "Runs", 500, 0 );
++		m_pList->SetMultiselectEnabled( false );
++		m_pList->AddActionSignalTarget( this );
++
++		m_pDesc = new vgui::Label( this, "Desc", "" );
++		m_pDesc->SetWrap( true );
++		m_pDesc->SetContentAlignment( vgui::Label::a_northwest );
++
++		m_pEntry = new vgui::TextEntry( this, "Entry" );
++		m_pEntry->SendNewLine( true );
++		m_pEntry->AddActionSignalTarget( this );
++
++		m_pHelp = new vgui::Label( this, "Help",
++			"D-pad: move   Left/Right: categories / commands   Cross: run   Circle or Triangle: close" );
++
++		m_pRun = new vgui::Button( this, "Run", "Run (Cross)", this, "run" );
++		m_pKeyboard = new vgui::Button( this, "Keyboard", "Keyboard...", this, "keyboard" );
++		m_pClose = new vgui::Button( this, "Close", "Close (Circle)", this, "close" );
++
++		SetBounds( 0, 0, 1240, 760 );
++		vgui::ivgui()->AddTickSignal( GetVPanel(), 50 );
++		SetVisible( false );
++	}
++
++	~CPS5CommandMenu()
++	{
++		if ( m_pData )
++			m_pData->deleteThis();
++	}
++
++	void PerformLayout() OVERRIDE
++	{
++		BaseClass::PerformLayout();
++		int w, h;
++		GetSize( w, h );
++		m_pCats->SetBounds( 16, 36, 270, h - 270 );
++		m_pList->SetBounds( 296, 36, w - 312, h - 270 );
++		m_pDesc->SetBounds( 16, h - 226, w - 32, 70 );
++		m_pEntry->SetBounds( 16, h - 148, w - 32, 32 );
++		m_pHelp->SetBounds( 16, h - 108, w - 32, 28 );
++		m_pRun->SetBounds( 16, h - 64, 200, 44 );
++		m_pKeyboard->SetBounds( 232, h - 64, 200, 44 );
++		m_pClose->SetBounds( w - 216, h - 64, 200, 44 );
++	}
++
++	void OnTick() OVERRIDE
++	{
++		BaseClass::OnTick();
++		if ( s_bPS5WeaponMenuHeld )
++			PS5WeaponMenuKeepOpen();
++		if ( zmr_take_command_menu_request() )
++		{
++			if ( IsVisible() )
++				Close();
++			else
++				Open();
++		}
++	}
++
++	void Open()
++	{
++		LoadCommands();
++		int sw, sh;
++		vgui::surface()->GetScreenSize( sw, sh );
++		int w, h;
++		GetSize( w, h );
++		SetPos( ( sw - w ) / 2, ( sh - h ) / 2 );
++		SetVisible( true );
++		MakePopup();
++		MoveToFront();
++		Activate();
++		if ( m_pCats->GetItemCount() > 0 )
++		{
++			m_pCats->SetSingleSelectedItem( m_pCats->GetItemIDFromRow( m_nCategoryRow < m_pCats->GetItemCount() ? m_nCategoryRow : 0 ) );
++			ShowCategory();
++			m_pCats->RequestFocus();
++		}
++	}
++
++	void OnCommand( const char *command ) OVERRIDE
++	{
++		if ( !Q_stricmp( command, "run" ) )
++			RunEntry();
++		else if ( !Q_stricmp( command, "keyboard" ) )
++		{
++			m_pEntry->RequestFocus();
++			m_pEntry->SetText( "" );
++			zmr_osk_open();
++		}
++		else if ( !Q_stricmp( command, "close" ) )
++			Close();
++		else
++			BaseClass::OnCommand( command );
++	}
++
++	void OnKeyCodePressed( vgui::KeyCode code ) OVERRIDE
++	{
++		switch ( GetBaseButtonCode( code ) )
++		{
++		case KEY_XBUTTON_LEFT:
++		case KEY_LEFT:
++			m_pCats->RequestFocus();
++			return;
++		case KEY_XBUTTON_RIGHT:
++		case KEY_RIGHT:
++			if ( m_pList->GetItemCount() > 0 )
++			{
++				if ( m_pList->GetSelectedItemsCount() == 0 )
++					m_pList->SetSingleSelectedItem( m_pList->GetItemIDFromRow( 0 ) );
++				m_pList->RequestFocus();
++			}
++			return;
++		case KEY_XBUTTON_A:
++			RunEntry();
++			return;
++		case KEY_XBUTTON_B:
++		case KEY_ESCAPE:
++			Close();
++			return;
++		default:
++			break;
++		}
++		BaseClass::OnKeyCodePressed( code );
++	}
++
++private:
++	MESSAGE_FUNC_PTR( OnItemSelected, "ItemSelected", panel )
++	{
++		if ( panel == m_pCats )
++		{
++			ShowCategory();
++			return;
++		}
++		int id = m_pList->GetSelectedItem( 0 );
++		KeyValues *kv = id >= 0 ? m_pList->GetItem( id ) : NULL;
++		if ( !kv )
++			return;
++		m_pDesc->SetText( kv->GetString( "description", "" ) );
++		m_pEntry->SetText( kv->GetString( "command", "" ) );
++	}
++
++	MESSAGE_FUNC_PTR( OnTextNewLine, "TextNewLine", panel )
++	{
++		RunEntry();
++	}
++
++	// Cross on a highlighted row (D-pad navigation).
++	MESSAGE_FUNC_PTR( OnItemChosen, "ListPanelItemChosen", panel )
++	{
++		if ( panel == m_pCats )
++		{
++			OnKeyCodePressed( KEY_XBUTTON_RIGHT );
++			return;
++		}
++		RunEntry();
++	}
++
++	void ShowCategory()
++	{
++		m_pList->RemoveAll();
++		m_pDesc->SetText( "" );
++		m_pEntry->SetText( "" );
++		int id = m_pCats->GetSelectedItem( 0 );
++		if ( id < 0 || !m_pData )
++			return;
++		m_nCategoryRow = m_pCats->GetItemCurrentRow( id );
++		KeyValues *cat = m_pData->FindKey( m_pCats->GetItem( id )->GetString( "name" ) );
++		if ( !cat )
++			return;
++		for ( KeyValues *item = cat->GetFirstTrueSubKey(); item; item = item->GetNextTrueSubKey() )
++		{
++			KeyValues *row = new KeyValues( "row" );
++			row->SetString( "label", item->GetString( "label", item->GetName() ) );
++			row->SetString( "command", item->GetString( "command", "" ) );
++			row->SetString( "description", item->GetString( "description", "" ) );
++			m_pList->AddItem( row, 0, false, false );
++			row->deleteThis();
++		}
++	}
++
++	void RunEntry()
++	{
++		char cmd[512];
++		m_pEntry->GetText( cmd, sizeof( cmd ) );
++		if ( !cmd[0] )
++			return;
++		Msg( "[commands] %s\n", cmd );
++		engine->ClientCmd_Unrestricted( cmd );
++		engine->ClientCmd_Unrestricted( "\n" );
++	}
++
++	void AddCategories( KeyValues *file )
++	{
++		for ( KeyValues *cat = file->GetFirstTrueSubKey(); cat; cat = cat->GetNextTrueSubKey() )
++		{
++			// A category holds items (subkeys with a "command"); merge same-named ones.
++			KeyValues *dst = m_pData->FindKey( cat->GetName(), true );
++			for ( KeyValues *item = cat->GetFirstTrueSubKey(); item; item = item->GetNextTrueSubKey() )
++				dst->AddSubKey( item->MakeCopy() );
++		}
++	}
++
++	void LoadCommands()
++	{
++		m_pCats->RemoveAll();
++		m_pList->RemoveAll();
++		if ( m_pData )
++			m_pData->deleteThis();
++		m_pData = new KeyValues( "Commands" );
++
++		KeyValues *file = new KeyValues( "Commands" );
++		if ( file->LoadFromFile( g_pFullFileSystem, "cfg/ps5_commands.txt", "MOD" ) )
++			AddCategories( file );
++		file->deleteThis();
++
++		// The player's own list: either categories, or plain items.
++		file = new KeyValues( "Commands" );
++		if ( file->LoadFromFile( g_pFullFileSystem, "cfg/ps5_commands_custom.txt", "MOD" ) )
++		{
++			KeyValues *first = file->GetFirstTrueSubKey();
++			if ( first && first->FindKey( "command" ) )
++			{
++				KeyValues *dst = m_pData->FindKey( "My commands", true );
++				for ( KeyValues *item = first; item; item = item->GetNextTrueSubKey() )
++					dst->AddSubKey( item->MakeCopy() );
++			}
++			else
++				AddCategories( file );
++		}
++		file->deleteThis();
++
++		for ( KeyValues *cat = m_pData->GetFirstTrueSubKey(); cat; cat = cat->GetNextTrueSubKey() )
++		{
++			KeyValues *row = new KeyValues( "row" );
++			row->SetString( "name", cat->GetName() );
++			m_pCats->AddItem( row, 0, false, false );
++			row->deleteThis();
++		}
++		if ( !m_pData->GetFirstTrueSubKey() )
++			m_pDesc->SetText( "cfg/ps5_commands.txt not found." );
++	}
++
++	KeyValues *m_pData;
++	int m_nCategoryRow = 0;
++	CPS5MenuList *m_pCats, *m_pList;
++	vgui::Label *m_pDesc, *m_pHelp;
++	vgui::TextEntry *m_pEntry;
++	vgui::Button *m_pRun, *m_pKeyboard, *m_pClose;
++};
++
++// Hold L1: show the weapon menu (pictures around the crosshair) for as long
++// as L1 is held, so it's visible before a D-pad direction is pressed.
++#include "weapon_selection.h"
++static void PS5WeaponMenuKeepOpen()
++{
++	CBaseHudWeaponSelection *pSel = GetHudWeaponSelection();
++	C_BasePlayer *pPlayer = C_BasePlayer::GetLocalPlayer();
++	if ( !pSel || !pPlayer || !pPlayer->IsAlive() || !pPlayer->GetActiveWeapon() )
++		return;
++	if ( !pSel->IsInSelectionMode() )
++		pSel->OpenSelection();
++	pSel->PS5SelectActiveWeapon();
++	pSel->PS5KeepOpen();
++}
++CON_COMMAND( _ps5_weaponmenu_down, "PS5: hold-L1 weapon menu (press)" ) { s_bPS5WeaponMenuHeld = true; PS5WeaponMenuKeepOpen(); }
++CON_COMMAND( _ps5_weaponmenu_up, "PS5: hold-L1 weapon menu (release)" ) { s_bPS5WeaponMenuHeld = false; }
++
++// "Triangle: commands   Square: console" in the corner of the main and
++// pause menus.
++class CPS5MenuHint : public vgui::Label
++{
++	DECLARE_CLASS_SIMPLE( CPS5MenuHint, vgui::Label );
++public:
++	CPS5MenuHint( vgui::VPANEL parent ) : BaseClass( NULL, "PS5MenuHint", "Triangle: command menu      Square: console" )
++	{
++		SetParent( parent );
++		SetMouseInputEnabled( false );
++		SetKeyBoardInputEnabled( false );
++		SetPaintBackgroundEnabled( true );
++		vgui::ivgui()->AddTickSignal( GetVPanel(), 250 );
++	}
++	void ApplySchemeSettings( vgui::IScheme *pScheme ) OVERRIDE
++	{
++		BaseClass::ApplySchemeSettings( pScheme );
++		SetFont( pScheme->GetFont( "DefaultLarge", false ) ? pScheme->GetFont( "DefaultLarge", false ) : pScheme->GetFont( "Default", false ) );
++		SetFgColor( Color( 255, 220, 160, 230 ) );
++		SetBgColor( Color( 0, 0, 0, 140 ) );
++		SetContentAlignment( vgui::Label::a_center );
++	}
++	void OnTick() OVERRIDE
++	{
++		bool show = enginevgui->IsGameUIVisible();
++		if ( show != IsVisible() )
++			SetVisible( show );
++		if ( show )
++		{
++			int sw, sh;
++			vgui::surface()->GetScreenSize( sw, sh );
++			int w = 520, h = 40;
++			SetBounds( sw - w - 32, sh - h - 32, w, h );
++		}
++	}
++};
++
++// The monitors' camera picture (_rt_Camera) is sampled by the screens before
++// the camera has rendered into it, and the first such read hangs the PS5's
++// GPU. Writing it once per level gives it defined contents first.
++static ConVar ps5_camera_rt_init( "ps5_camera_rt_init", "0", 0, "PS5: clear the monitor camera picture when a level loads (prevents a GPU hang)" );
++static void PS5InitCameraTarget( const char *why )
++{
++	if ( !ps5_camera_rt_init.GetBool() )
++		return;
++	ITexture *pTex = materials->FindTexture( "_rt_Camera", TEXTURE_GROUP_RENDER_TARGET, false );
++	if ( !pTex || pTex->IsError() )
++		return;
++	CMatRenderContextPtr pRenderContext( materials );
++	pRenderContext->PushRenderTargetAndViewport( pTex );
++	pRenderContext->ClearColor4ub( 0, 0, 0, 255 );
++	pRenderContext->ClearBuffers( true, true, false );
++	pRenderContext->PopRenderTargetAndViewport();
++	Msg( "[ps5-monitor] camera picture initialised (%s)\n", why );
++}
++CON_COMMAND( ps5_camera_rt_clear, "PS5: clear the monitor camera picture now" ) { PS5InitCameraTarget( "command" ); }
++
++// Created once the client's UI is up.
++class CPS5CommandMenuSystem : public CAutoGameSystem
++{
++public:
++	CPS5CommandMenuSystem() : CAutoGameSystem( "PS5CommandMenu" ), m_pMenu( NULL ), m_pHint( NULL ) {}
++	virtual void LevelInitPostEntity()
++	{
++		PS5InitCameraTarget( "level start" );
++	}
++	virtual void PostInit()
++	{
++		vgui::VPANEL parent = enginevgui->GetPanel( PANEL_GAMEUIDLL );
++		if ( !m_pMenu )
++			m_pMenu = new CPS5CommandMenu( parent );
++		if ( !m_pHint )
++			m_pHint = new CPS5MenuHint( parent );
++	}
++	CPS5CommandMenu *m_pMenu;
++	CPS5MenuHint *m_pHint;
++};
++static CPS5CommandMenuSystem s_PS5CommandMenuSystem;
++
++#endif // PLATFORM_PS5
+diff --git a/game/client/viewrender.cpp b/game/client/viewrender.cpp
+index 704f071..7c227ac 100644
+--- a/game/client/viewrender.cpp
++++ b/game/client/viewrender.cpp
+@@ -3017,6 +3017,13 @@ void CViewRender::ViewDrawScene_Intro( const CViewSetup &view, int nClearFlags,
+ //			highend - 
+ // Output : Returns true on success, false on failure.
+ //-----------------------------------------------------------------------------
++#ifdef PLATFORM_PS5
++extern "C" void zmr_trace( const char *what );
++extern "C" void zmr_trace_draws( int on );
++extern "C" void zmr_sync_next_draws( int n );
++extern "C" void zmr_set_phase( const char *phase );
++static ConVar ps5_monitor_sync( "ps5_monitor_sync", "0", 0, "PS5: lock-step with the GPU when a monitor camera first renders (freeze test). 1 = ~2 s, 2 = ~60 s" );
++#endif
+ bool CViewRender::DrawOneMonitor( ITexture *pRenderTarget, int cameraNum, C_PointCamera *pCameraEnt, 
+ 	const CViewSetup &cameraView, C_BasePlayer *localPlayer, int x, int y, int width, int height )
+ {
+@@ -3071,9 +3078,57 @@ bool CViewRender::DrawOneMonitor( ITexture *pRenderTarget, int cameraNum, C_Poin
+ 
+ 	// @MULTICORE (toml 8/11/2006): this should be a renderer....
+ 	Frustum frustum;
++#ifdef PLATFORM_PS5
++	// The first time a monitor camera renders, the PS5 GPU can fault (a race
++	// between the camera's first render and the previous frame still on the
++	// GPU). Running the next few frames in lock-step with the GPU avoids it.
++	{
++		static const void *s_pSeen[64];
++		static int s_nSeen = 0;
++		static char s_szLevel[64];
++		const char *pszLevel = engine->GetLevelName();
++		if ( Q_strcmp( s_szLevel, pszLevel ? pszLevel : "" ) )
++		{
++			Q_strncpy( s_szLevel, pszLevel ? pszLevel : "", sizeof( s_szLevel ) );
++			s_nSeen = 0;
++		}
++		bool bNew = true;
++		for ( int i = 0; i < s_nSeen; ++i )
++			if ( s_pSeen[i] == pCameraEnt )
++				bNew = false;
++		if ( bNew )
++		{
++			if ( s_nSeen < 64 )
++				s_pSeen[s_nSeen++] = pCameraEnt;
++			if ( ps5_monitor_sync.GetBool() )
++			{
++				zmr_sync_next_draws( ps5_monitor_sync.GetInt() >= 2 ? 200000 : 6000 );
++				zmr_trace( "monitor camera starting" );
++			}
++		}
++	}
++	const bool bTrace = false;
++#endif
+  	render->Push3DView( monitorView, VIEW_CLEAR_DEPTH | VIEW_CLEAR_COLOR, pRenderTarget, (VPlane *)frustum );
++#ifdef PLATFORM_PS5
++	if ( bTrace ) zmr_trace( "monitor: view pushed; drawing scene" );
++#endif
++#ifdef PLATFORM_PS5
++	zmr_set_phase( "camera" );
++#endif
+ 	ViewDrawScene( false, SKYBOX_2DSKYBOX_VISIBLE, monitorView, 0, VIEW_MONITOR );
++#ifdef PLATFORM_PS5
++	zmr_set_phase( "main" );
++	if ( bTrace ) zmr_trace( "monitor: scene drawn; pop view" );
++#endif
+  	render->PopView( frustum );
++#ifdef PLATFORM_PS5
++	if ( bTrace )
++	{
++		zmr_trace( "monitor: view popped" );
++
++	}
++#endif
+ 
+ 	// Reset the world fog parameters.
+ 	if ( fogEnabled )
+@@ -3112,6 +3167,20 @@ void CViewRender::DrawMonitors( const CViewSetup &cameraView )
+ 	ITexture *pCameraTarget = GetCameraTexture();
+ 	int width = pCameraTarget->GetActualWidth();
+ 	int height = pCameraTarget->GetActualHeight();
++#ifdef PLATFORM_PS5
++	{
++		static int s_nLogged = 0;
++		if ( s_nLogged < 3 )
++		{
++			++s_nLogged;
++			int bw, bh;
++			materials->GetBackBufferDimensions( bw, bh );
++			Msg( "[ps5-monitor] camera target %dx%d format %d, back buffer %dx%d, eyes %d flex %d 3dsky %d\n",
++				width, height, (int)pCameraTarget->GetImageFormat(), bw, bh,
++				ConVarRef( "r_eyes" ).GetInt(), ConVarRef( "r_flex" ).GetInt(), ConVarRef( "r_3dsky" ).GetInt() );
++		}
++	}
++#endif
+ 
+ 	C_BasePlayer *player = C_BasePlayer::GetLocalPlayer();
+ 	
+diff --git a/game/client/weapon_selection.h b/game/client/weapon_selection.h
+index bca6840..3f8aaf8 100644
+--- a/game/client/weapon_selection.h
++++ b/game/client/weapon_selection.h
+@@ -40,6 +40,10 @@ public:
+ 
+ 	virtual void OpenSelection( void );
+ 	virtual void HideSelection( void );
++#ifdef PLATFORM_PS5
++	void	PS5KeepOpen( void ) { m_flSelectionTime = gpGlobals->curtime; }	// hold-L1 weapon menu
++	virtual void PS5SelectActiveWeapon( void ) {}	// so the menu has something highlighted
++#endif
+ 
+ 	virtual void				CancelWeaponSelection( void );
+ 
+diff --git a/game/server/player.cpp b/game/server/player.cpp
+index 18aeded..81d3f0b 100644
+--- a/game/server/player.cpp
++++ b/game/server/player.cpp
+@@ -2120,6 +2120,11 @@ void CBasePlayer::PlayerDeathThink(void)
+ 	m_flPlaybackRate = 0.0;
+ 	
+ 	int fAnyButtonDown = (m_nButtons & ~IN_SCORE);
++#ifdef PLATFORM_PS5
++	// The PS5 controller layout toggles sprint and crouch (L3, Circle), so
++	// those stay "held" indefinitely; don't let them block the respawn.
++	fAnyButtonDown &= ~( IN_SPEED | IN_DUCK );
++#endif
+ 	
+ 	// Strip out the duck key from this check if it's toggled
+ 	if ( (fAnyButtonDown & IN_DUCK) && GetToggledDuckState())
 diff --git a/inputsystem/joystick_sdl.cpp b/inputsystem/joystick_sdl.cpp
 index aef5c48..5d53a9c 100644
 --- a/inputsystem/joystick_sdl.cpp
@@ -301,6 +1528,67 @@ index 0b27da7..fe9f517 100644
  #elif defined (LINUX) || defined(PLATFORM_BSD)
  	/*
  	 * Linux
+diff --git a/materialsystem/cmaterial.cpp b/materialsystem/cmaterial.cpp
+index 12d17df..3a2932a 100644
+--- a/materialsystem/cmaterial.cpp
++++ b/materialsystem/cmaterial.cpp
+@@ -3055,6 +3055,10 @@ bool CMaterial::HasProxy( )	const
+ #pragma warning (disable: 4189)
+ #endif
+ 
++#ifdef PLATFORM_PS5
++extern "C" void zmr_set_material( const char *name );
++extern "C" int zmr_material_skipped( const char *name );
++#endif
+ void CMaterial::DrawMesh( VertexCompressionType_t vertexCompression )
+ {
+ 	if ( m_pShader )
+@@ -3070,6 +3074,45 @@ void CMaterial::DrawMesh( VertexCompressionType_t vertexCompression )
+ 		if ((GetMaterialVarFlags() & MATERIAL_VAR_NO_DRAW) == 0)
+ 		{
+ 			const char *pName = m_pShader->GetName();
++#ifdef PLATFORM_PS5
++			zmr_set_material( GetName() );
++			if ( zmr_material_skipped( GetName() ) )
++				return;
++			{
++				// First draw of each material: the last one printed before a
++				// GPU hang names the model or surface responsible.
++				static const void *s_seen[16384];
++				uintp h = ( (uintp)this >> 4 ) * 2654435761u;
++				for ( int i = 0; i < 16384; ++i )
++				{
++					int slot = (int)( ( h + i ) & 16383 );
++					if ( s_seen[slot] == this )
++						break;
++					if ( !s_seen[slot] )
++					{
++						s_seen[slot] = this;
++						printf( "[ps5-material] first draw %s (%s)\n", GetName(), pName ? pName : "?" );
++						// Describe its textures (size, format, frames): a texture the
++						// GPU faults on shows up here as the last entry before a hang.
++						static const char *s_texVars[] = { "$basetexture", "$texture2", "$detail", "$envmap", "$bumpmap", NULL };
++						for ( int v = 0; s_texVars[v]; ++v )
++						{
++							bool bFound = false;
++							IMaterialVar *pVar = FindVar( s_texVars[v], &bFound, false );
++							if ( !bFound || !pVar || !pVar->IsTexture() )
++								continue;
++							ITexture *pTex = pVar->GetTextureValue();
++							if ( !pTex )
++								continue;
++							printf( "[ps5-material]   %s = %s %dx%d format %d frames %d%s\n", s_texVars[v], pTex->GetName(),
++								pTex->GetActualWidth(), pTex->GetActualHeight(), (int)pTex->GetImageFormat(),
++								pTex->GetNumAnimationFrames(), pTex->IsRenderTarget() ? " (render target)" : "" );
++						}
++						break;
++					}
++				}
++			}
++#endif
+ 			ShaderSystem()->DrawElements( m_pShader, m_pShaderParams, &m_ShaderRenderState, vertexCompression, m_ChangeID ^ g_nDebugVarsSignature );
+ 		}
+ 	}
 diff --git a/materialsystem/cmaterialsystem.cpp b/materialsystem/cmaterialsystem.cpp
 index e787071..2c46668 100644
 --- a/materialsystem/cmaterialsystem.cpp
@@ -330,6 +1618,21 @@ index d309efc..ea66dfb 100644
  
  	return ( bExist );
  }
+diff --git a/public/tier0/threadtools.h b/public/tier0/threadtools.h
+index b721619..56b37ee 100644
+--- a/public/tier0/threadtools.h
++++ b/public/tier0/threadtools.h
+@@ -2297,6 +2297,10 @@ inline CThreadMutex::CThreadMutex()
+ 	pthread_mutexattr_init( &m_Attr );
+ 	pthread_mutexattr_settype( &m_Attr, PTHREAD_MUTEX_RECURSIVE );
+ 	pthread_mutex_init( &m_Mutex, &m_Attr );
++	// The attribute is only needed for init. On FreeBSD-based systems (PS5)
++	// it is a heap object; never destroying it leaked one per mutex until the
++	// system's pthread memory ran out (long-session crash).
++	pthread_mutexattr_destroy( &m_Attr );
+ }
+ 
+ //---------------------------------------------------------
 diff --git a/public/togl/linuxwin/glmgr.h b/public/togl/linuxwin/glmgr.h
 index a81ca03..0260cc0 100644
 --- a/public/togl/linuxwin/glmgr.h
@@ -394,30 +1697,46 @@ index 621ab39..a231fb6 100644
  	{
  		m_bHave_GL_ARB_buffer_storage = false;
 diff --git a/togl/linuxwin/glmgr.cpp b/togl/linuxwin/glmgr.cpp
-index 745862b..6266e26 100644
+index 745862b..b74e59f 100644
 --- a/togl/linuxwin/glmgr.cpp
 +++ b/togl/linuxwin/glmgr.cpp
-@@ -28,6 +28,10 @@
+@@ -28,6 +28,15 @@
  #include "togl/rendermechanism.h"
  
  #include "tier0/icommandline.h"
 +#ifdef PLATFORM_PS5
 +extern "C" void ps5_draw_pre( GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const void *indices, GLint baseVertex );
 +extern "C" void ps5_draw_post( void );
++extern "C" int zmr_shader_skipped( const char *vs, const char *ps );
++extern "C" void zmr_note_draw( const void *pair, const char *vs, const char *ps );
++extern "C" void zmr_breadcrumb_draw( const char *vs, const char *ps );
++extern "C" int zmr_sync_draws( void );
++extern "C" int zmr_tracing_draws( void );
 +#endif
  
  #include "tier0/vprof.h"
  #include "glmtexinlines.h"
-@@ -5184,7 +5188,13 @@ void GLMContext::DrawRangeElementsNonInline( GLenum mode, GLuint start, GLuint e
+@@ -5184,7 +5193,24 @@ void GLMContext::DrawRangeElementsNonInline( GLenum mode, GLuint start, GLuint e
  
  	if ( m_pBoundPair )
  	{
 +#ifdef PLATFORM_PS5
++		// ps5_skip_shader: leave out draws of a named shader (diagnosing GPU hangs).
++		{
++			const char *vsName = m_pBoundPair->m_vertexProg ? m_pBoundPair->m_vertexProg->m_shaderName : "";
++			const char *psName = m_pBoundPair->m_fragmentProg ? m_pBoundPair->m_fragmentProg->m_shaderName : "";
++			if ( zmr_shader_skipped( vsName, psName ) )
++				return;
++			zmr_note_draw( m_pBoundPair, vsName, psName );
++			zmr_breadcrumb_draw( vsName, psName );
++		}
 +		ps5_draw_pre( mode, start, end, count, type, indicesActual, baseVertex );
 +#endif
  		gGL->glDrawRangeElementsBaseVertex( mode, start, end, count, type, indicesActual, baseVertex );
 +#ifdef PLATFORM_PS5
 +		ps5_draw_post();
++		if ( zmr_sync_draws() || zmr_tracing_draws() )
++			gGL->glFinish();	// lock-step with the GPU: a hang stops on this draw
 +#endif
  
  #if GLMDEBUG
@@ -500,6 +1819,24 @@ index 0470371..8db5d4a 100644
  	return fontFile;
  #else
  	bool bRegularPostfix = false;
+diff --git a/vguimatsurface/Cursor.cpp b/vguimatsurface/Cursor.cpp
+index 5451541..b0c4cf9 100644
+--- a/vguimatsurface/Cursor.cpp
++++ b/vguimatsurface/Cursor.cpp
+@@ -428,7 +428,13 @@ void ActivateCurrentCursor()
+ {
+ 	if( s_bSoftwareCursorActive )
+ 	{
++#ifdef PLATFORM_PS5
++		// PS5 has no OS cursor. Keep the launcher's idea of visibility in step
++		// with vgui so menus get absolute mouse mode and the controller pointer.
++		g_pLauncherMgr->SetMouseVisible( s_bCursorVisible || ( s_nForceCursorVisibleCount > 0 ) );
++#else
+ 		HideHardwareCursor();
++#endif
+ 		return;
+ 	}
+ 
 diff --git a/wscript b/wscript
 index 16f2263..c6786ca 100644
 --- a/wscript

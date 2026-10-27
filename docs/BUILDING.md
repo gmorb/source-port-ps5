@@ -66,7 +66,7 @@ git -C ps5-opengl    apply ../source-port-ps5/patches/ps5-opengl.patch
 | Patch | What it changes |
 | --- | --- |
 | `source-engine-ps5.patch` | `waf --ps5` target; PS5 fixes in the launcher, filesystem, sockets, fonts, joystick, SDL audio and window; togl tweaks (no persistent buffers, draw hooks) |
-| `ps5-opengl.patch` | GPU blits for presents, refraction and screen-effect copies (they were CPU); audio enabled in the SDL bridge |
+| `ps5-opengl.patch` | GPU blits for presents, refraction and screen-effect copies (they were CPU); audio enabled in the SDL bridge; graphics memory released only after the GPU finished with it; freeze-recorder hooks |
 | `ps5-opengl-mesa-from-git.patch` | Optional: fetch Mesa 26.2.0 from git instead of archive.mesa3d.org |
 | `ps5-opengl-local.patch` | Everything in `ps5-opengl.patch` plus the local override used for the release build: `toolchain/apply-mesa-ps5-patch.sh` accepts Mesa 26.2.0 exported from git (patch pre-applied) when archive.mesa3d.org is unreachable |
 
