@@ -52,7 +52,7 @@ cp "$gl/third_party/imgui/misc/fonts/DroidSans.ttf" "$gl/third_party/imgui/misc/
 rm -rf -- "$app/src" "$app/include" "$app/vendor"
 mkdir -p "$app/src" "$app/include" "$app/vendor"
 cp "$gl/native-app/runtime_shims.c" "$app/src/runtime_shims.c"
-cp "$gl/native-app/app_heap.c" "$app/src/app_heap.c"
+cp "$here/runtime/zmr_app_heap.c" "$app/src/app_heap.c"   # ps5-opengl native-app/app_heap.c + optional lock
 cp "$here/runtime/zmr_platform.c" "$here/runtime/zmr_libc_compat.c" "$here/runtime/zmr_fs_overlay.c" "$here/runtime/zmr_memdiag.c" "$here/runtime/zmr_hid.c" "$here/runtime/zmr_commands.c" "$here/runtime/zmr_audio.c" "$app/src/"
 
 # Metadata

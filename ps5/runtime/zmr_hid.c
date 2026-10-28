@@ -665,7 +665,7 @@ static void zmr_crumb_persist(const char *vs, const char *ps)
 {
     PCrumbFile *f = s_pcrumbs;
     if (!f || !s_crumbsOn) return;
-    uint32_t i = f->next;
+    uint32_t i = __atomic_fetch_add(&f->next, 1, __ATOMIC_RELAXED);
     PCrumb *c = &f->ring[i % PCRUMBS];
     c->seq = i;
     c->frame = (uint32_t)zmr_frame_count();
@@ -677,7 +677,6 @@ static void zmr_crumb_persist(const char *vs, const char *ps)
     copy_tail(c->ps, sizeof(c->ps), ps);
     f->submitted = ps5_gl_batches_submitted;
     f->retired = ps5_gl_batches_retired;
-    f->next = i + 1;
 }
 
 /* Driver/launcher milestones (blits, presents, submissions) in the same ring,
@@ -686,7 +685,7 @@ void zmr_crumb_note(const char *what, unsigned a, unsigned b)
 {
     PCrumbFile *f = s_pcrumbs;
     if (!f || !s_crumbsOn) return;
-    uint32_t i = f->next;
+    uint32_t i = __atomic_fetch_add(&f->next, 1, __ATOMIC_RELAXED);
     PCrumb *c = &f->ring[i % PCRUMBS];
     c->seq = i;
     c->frame = (uint32_t)zmr_frame_count();
@@ -697,7 +696,6 @@ void zmr_crumb_note(const char *what, unsigned a, unsigned b)
     c->vs[0] = c->ps[0] = 0;
     f->submitted = ps5_gl_batches_submitted;
     f->retired = ps5_gl_batches_retired;
-    f->next = i + 1;
 }
 
 /* Watchdog thread: called every 250 ms. */
@@ -791,11 +789,11 @@ void zmr_crumbs_init(const char *dir, void (*out)(const char *))
             /* Sound starts and audio-thread notes from the whole ring
              * (the last 30), with how many records before the end. */
             {
-                uint32_t idx[30]; unsigned n = 0;
-                for (uint32_t k = end; k != end - count && n < 30; ) {
+                uint32_t idx[60]; unsigned n = 0;
+                for (uint32_t k = end; k != end - count && n < 60; ) {
                     --k;
                     const PCrumb *c = &old.ring[k % PCRUMBS];
-                    if (!strncmp(c->material, "snd ", 4) || !strncmp(c->material, "audio", 5))
+                    if (!strncmp(c->material, "snd ", 4) || !strncmp(c->material, "audio", 5) || !strncmp(c->material, "io ", 3))
                         idx[n++] = k;
                 }
                 while (n) {

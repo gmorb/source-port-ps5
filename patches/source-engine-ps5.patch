@@ -540,6 +540,78 @@ index aecf5eb..0a98594 100644
  	m_bActiveApp = active;
  }
  
+diff --git a/filesystem/filesystem_async.cpp b/filesystem/filesystem_async.cpp
+index 493b1b7..f3d1084 100644
+--- a/filesystem/filesystem_async.cpp
++++ b/filesystem/filesystem_async.cpp
+@@ -231,6 +231,18 @@ enum FSAsyncMode_t
+ 
+ // Cast to int in order to indicate that we are intentionally comparing different
+ // enum types, to suppress gcc warnings.
++#ifdef PLATFORM_PS5
++extern "C" void zmr_crumb_note( const char *what, unsigned a, unsigned b );
++static void PS5IoNote( const char *what, const char *file, unsigned a, unsigned b )
++{
++	char note[80];
++	size_t len = file ? strlen( file ) : 0;
++	Q_snprintf( note, sizeof( note ), "io %s %s", what, len > 44 ? file + len - 44 : ( file ? file : "?" ) );
++	zmr_crumb_note( note, a, b );
++}
++#else
++#define PS5IoNote( w, f, a, b ) ((void)0)
++#endif
+ ASSERT_INVARIANT( FSASYNC_OK == (int)JOB_OK );
+ ASSERT_INVARIANT( FSASYNC_STATUS_PENDING == (int)JOB_STATUS_PENDING );
+ ASSERT_INVARIANT( FSASYNC_STATUS_INPROGRESS == (int)JOB_STATUS_INPROGRESS );
+@@ -343,7 +355,9 @@ public:
+ 		{
+ 			int iPrevPriority = ThreadGetPriority();
+ 			ThreadSetPriority( 2 );
++			PS5IoNote( "job", pszFilename, (unsigned)nBytes, (unsigned)nOffset );
+ 			retval = BaseFileSystem()->SyncRead( *this );
++			PS5IoNote( "job done", pszFilename, (unsigned)retval, 0 );
+ 			ThreadSetPriority( iPrevPriority );
+ 		}
+ 
+@@ -682,6 +696,18 @@ void CBaseFileSystem::InitAsync()
+ 		{
+ 			params.nThreadsMax = MIN(params.nThreads, 4); // Limit count of IO threads to a maximum of 4.
+ 			params.nStackSize = 256*1024;
++#ifdef PLATFORM_PS5
++			// nThreads is -1 (one per core) here, so MIN() above limits nothing:
++			// a scripted scene that prefetches its voice lines started 16
++			// concurrent reads of the packaged game files, and the PS5 stopped
++			// the app (the scripted-scene freeze). One I/O thread keeps loading
++			// in the background but reads one file at a time.
++			// -ps5_iothreads N overrides it for testing.
++			int nIoThreads = CommandLine()->ParmValue( "-ps5_iothreads", 1 );
++			params.nThreads = MAX( nIoThreads, 1 );
++			params.nThreadsMax = params.nThreads;
++			Msg( "PS5: %d async I/O thread(s)\n", params.nThreads );
++#endif
+ 		}
+ 
+ 		if ( !m_pThreadPool->Start( params, "IOJob" ) )
+@@ -1503,7 +1529,9 @@ void CBaseFileSystem::DoAsyncCallback( const FileAsyncRequest_t &request, void *
+ 			temp.pData = pData;
+ 			{
+ 				AUTOBLOCKREPORTER_FN( DoAsyncCallback, this, false, temp.pszFilename, FILESYSTEM_BLOCKING_CALLBACKTIMING, FileBlockingItem::FB_ACCESS_READ );
++				PS5IoNote( "callback", temp.pszFilename, (unsigned)nBytesRead, (unsigned)(uintptr_t)pData );
+ 				(*request.pfnCallback)( temp, nBytesRead, result );
++				PS5IoNote( "callback done", temp.pszFilename, 0, 0 );
+ 			}
+ 			if ( !( request.flags & FSASYNC_FLAGS_ALLOCNOFREE ) )
+ 			{
+@@ -1514,7 +1542,9 @@ void CBaseFileSystem::DoAsyncCallback( const FileAsyncRequest_t &request, void *
+ 		{
+ 			{
+ 				AUTOBLOCKREPORTER_FN( DoAsyncCallback, this, false, request.pszFilename, FILESYSTEM_BLOCKING_CALLBACKTIMING, FileBlockingItem::FB_ACCESS_READ );
++				PS5IoNote( "callback", request.pszFilename, (unsigned)nBytesRead, (unsigned)(uintptr_t)request.pData );
+ 				(*request.pfnCallback)( request, nBytesRead, result );
++				PS5IoNote( "callback done", request.pszFilename, 0, 0 );
+ 			}
+ 			if ( ( request.flags & FSASYNC_FLAGS_FREEDATAPTR ) )
+ 			{
 diff --git a/game/client/baseclientrendertargets.cpp b/game/client/baseclientrendertargets.cpp
 index 3aa642c..6c80d2e 100644
 --- a/game/client/baseclientrendertargets.cpp

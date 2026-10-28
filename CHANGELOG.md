@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.1.3-alpha (contentVersion 01.000.050) — 2026-10-28
+
+- **Root cause of the scripted-scene freeze found and fixed.** When a scene
+  starts, it loads all of its voice lines at once. The engine's cap on
+  background loading threads didn't apply, so it started one per CPU core
+  (16 on PS5), and 16 simultaneous reads of the packaged game files made the
+  system stop the app. The filesystem now uses a single background loading
+  thread on PS5, so files load one at a time without holding up the game.
+- Background loading is back on: the `-noasync` workaround from v0.1.2 is no
+  longer added automatically, which removes its small hitches when new sounds
+  play. `-noasync` in `args.txt` still loads everything on the main thread;
+  `-ps5_iothreads N` sets the number of loading threads (testing).
+- The freeze recorder also follows the background loading thread.
+
 ## v0.1.2-alpha (contentVersion 01.000.046) — 2026-10-28
 
 - **Fixed the freeze when a scripted scene starts** (Barney's checkpoint when

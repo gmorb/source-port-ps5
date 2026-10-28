@@ -166,7 +166,8 @@ Useful additions:
 | `+map d1_trainstation_01` | Start straight into a map |
 | `-nosound` | Disable audio |
 | `-console -dev 2 -condebug` | Open the developer console and write `console.log` |
-| `-ps5_async` | Load files on a background thread (the PC default; it froze the game on PS5, so the port loads on the main thread) |
+| `-noasync` | Load all files on the main thread instead of the background loading thread (causes short hitches; fallback if loading misbehaves) |
+| `-ps5_iothreads N` | Number of background loading threads (default 1; 16 at once froze the game on PS5) |
 | `-ps5_freeze_recorder` | Record the last draws so a freeze is reported on the next launch (also in the △ menu under Developer tests) |
 | `-ps5_prof` | Built-in sampling profiler, written to the log every 30 s (development) |
 | `-ps5_quit1` … `-ps5_quit4` | Alternative ways of quitting the app (debugging) |
