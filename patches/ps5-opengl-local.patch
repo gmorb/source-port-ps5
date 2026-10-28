@@ -23,7 +23,7 @@ index d12228b..ad9e403 100644
      add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -g)
      add_link_options(-fsanitize=address,undefined)
 diff --git a/src/gallium/ps5/ps5_screen.c b/src/gallium/ps5/ps5_screen.c
-index 2f6a1b6..08896c2 100644
+index 2f6a1b6..01320dc 100644
 --- a/src/gallium/ps5/ps5_screen.c
 +++ b/src/gallium/ps5/ps5_screen.c
 @@ -264,6 +264,10 @@ static void ps5_prepare_scope_end(struct ps5_prepare_scope *scope)
@@ -396,7 +396,15 @@ index 2f6a1b6..08896c2 100644
     ps5_draw_batch_drain_buffer(info ? info->src.resource : NULL);
     ps5_draw_batch_drain_buffer(info ? info->dst.resource : NULL);
     if (PS5_ENABLE_MSAA4_CANDIDATE && info && info->src.resource &&
-@@ -11646,8 +11826,11 @@ ps5_context_queue_present(struct pipe_context *base, unsigned buffer_index)
+@@ -9020,6 +9200,7 @@ ps5_flush(struct pipe_context *context, struct pipe_fence_handle **out_fence,
+    struct ps5_fence *fence;
+ 
+    (void)flags;
++   ZMR_NOTE("flush", out_fence != NULL, flags);
+    if (!out_fence) {
+       ps5_draw_batch_submit();
+       return;
+@@ -11646,8 +11827,11 @@ ps5_context_queue_present(struct pipe_context *base, unsigned buffer_index)
  {
  #ifdef PS5_GPU_PRESENT_BATCH
     extern int ps5_agc_gate2_batch_present(unsigned);
@@ -409,6 +417,32 @@ index 2f6a1b6..08896c2 100644
         ps5_agc_gate2_batch_present(buffer_index) != 0) {
        fputs("[ps5-gallium] queued presentation failed; terminating before resource release\n", stderr);
        _Exit(EXIT_FAILURE);
+@@ -12562,6 +12746,8 @@ ps5_draw_vbo_reported(struct pipe_context *base, const struct pipe_draw_info *in
+ {
+    struct ps5_context *context = (struct ps5_context *)base;
+    struct pipe_sampler_view *fbfetch_saved = NULL;
++   ZMR_NOTE("draw", num_draws ? draws[0].count : 0,
++            (context->framebuffer.width << 16) | (context->framebuffer.height & 0xffff));
+    void *fbfetch_saved_sampler = NULL;
+    const unsigned fbfetch_unit = context->fs ? context->fs->fbfetch_unit : 0;
+    context->last_draw_status = 0;
+@@ -13572,6 +13758,8 @@ ps5_clear(struct pipe_context *base, unsigned buffers,
+ 
+    struct ps5_context *context = (struct ps5_context *)base;
+    struct ps5_resource *resource;
++   ZMR_NOTE("clear", buffers | (context->framebuffer.nr_cbufs << 8),
++            (context->framebuffer.width << 16) | (context->framebuffer.height & 0xffff));
+ 
+    if (context && context->render_condition_query)
+       ps5_draw_batch_drain_query(context->render_condition_query);
+@@ -17312,6 +17500,7 @@ ps5_resource_copy_region(struct pipe_context *base, struct pipe_resource *dst,
+                           struct pipe_resource *src, unsigned src_level,
+                           const struct pipe_box *src_box)
+ {
++   ZMR_NOTE("copy-region", src ? src->width0 : 0, dst ? dst->width0 : 0);
+    if (ps5_copy_identical_image(dst, dst_level, dst_x, dst_y, dst_z, src, src_level, src_box))
+       return;
+    util_resource_copy_region(base, dst, dst_level, dst_x, dst_y, dst_z, src, src_level, src_box);
 diff --git a/src/platform/ps5_agc_native_runtime.c b/src/platform/ps5_agc_native_runtime.c
 index a5a0803..29c6038 100644
 --- a/src/platform/ps5_agc_native_runtime.c

@@ -166,6 +166,7 @@ Useful additions:
 | `+map d1_trainstation_01` | Start straight into a map |
 | `-nosound` | Disable audio |
 | `-console -dev 2 -condebug` | Open the developer console and write `console.log` |
+| `-ps5_async` | Load files on a background thread (the PC default; it froze the game on PS5, so the port loads on the main thread) |
 | `-ps5_freeze_recorder` | Record the last draws so a freeze is reported on the next launch (also in the △ menu under Developer tests) |
 | `-ps5_prof` | Built-in sampling profiler, written to the log every 30 s (development) |
 | `-ps5_quit1` … `-ps5_quit4` | Alternative ways of quitting the app (debugging) |
@@ -176,12 +177,6 @@ written to `zmr.log` in the app's data. Attach a log to bug reports.
 
 ## Known issues
 
-- **Freeze when a character starts a scripted scene**, most often at Barney's
-  checkpoint (when Kleiner appears on the monitor) and in Dr. Kleiner's lab.
-  Close the game from the PS button menu and load the last save. A retry
-  usually gets through, and once a scene has played it won't freeze again
-  until the game is relaunched. This is being worked on; logs made with the
-  freeze recorder (see Configuration) help.
 - **Short hitches the first time an area loads** while shaders are compiled and
   textures are uploaded. They are gone on the next pass.
 - **Only Half-Life 2 has been tested.** Episodes, Lost Coast and mods are not

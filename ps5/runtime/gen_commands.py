@@ -7,7 +7,7 @@ VERSION whenever the list changes: the launcher replaces an older file.
 """
 from pathlib import Path
 
-VERSION = 20
+VERSION = 21
 CHEATS = "sv_cheats 1; "
 
 L = []  # (category, label, command, description)
@@ -262,6 +262,11 @@ add(T, "Clear console", "clear", "Empties the console.")
 
 # ---- Developer tests ---------------------------------------------------------
 X = "Developer tests"
+add(X, "Sound freeze test: play new sounds", "ps5_freeze_recorder 1; ps5_sound_stress play 300",
+    "Plays up to 300 voice/NPC/ambient sounds the game hasn't used yet, one every few frames, to reproduce the freeze from the menu. Recorder on.")
+add(X, "Sound freeze test: load new sounds only", "ps5_freeze_recorder 1; ps5_sound_stress load 300",
+    "Same, but only loads each sound without playing it (tells loading apart from playing).")
+add(X, "Sound freeze test: stop", "ps5_sound_stress_stop", "Stop the sound freeze test.")
 add(X, "Freeze recorder on", "ps5_freeze_recorder 1",
     "Record every draw to crumbs.bin so the next launch can report a freeze (costs some fps). Also: -ps5_freeze_recorder in args.txt.")
 add(X, "Freeze recorder off (default)", "ps5_freeze_recorder 0",

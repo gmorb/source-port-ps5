@@ -1,4 +1,4 @@
-// ps5-commands-version 20
+// ps5-commands-version 21
 // Triangle command menu (PS5 port). Generated: replaced when the app updates.
 // Add your own commands to ps5_commands_custom.txt instead.
 "Commands"
@@ -1378,11 +1378,29 @@
 		}
 		"38"
 		{
+			"label"	"Sound freeze test: play new sounds"
+			"command"	"ps5_freeze_recorder 1; ps5_sound_stress play 300"
+			"description"	"Plays up to 300 voice/NPC/ambient sounds the game hasn't used yet, one every few frames, to reproduce the freeze from the menu. Recorder on."
+		}
+		"39"
+		{
+			"label"	"Sound freeze test: load new sounds only"
+			"command"	"ps5_freeze_recorder 1; ps5_sound_stress load 300"
+			"description"	"Same, but only loads each sound without playing it (tells loading apart from playing)."
+		}
+		"40"
+		{
+			"label"	"Sound freeze test: stop"
+			"command"	"ps5_sound_stress_stop"
+			"description"	"Stop the sound freeze test."
+		}
+		"41"
+		{
 			"label"	"Freeze recorder on"
 			"command"	"ps5_freeze_recorder 1"
 			"description"	"Record every draw to crumbs.bin so the next launch can report a freeze (costs some fps). Also: -ps5_freeze_recorder in args.txt."
 		}
-		"39"
+		"42"
 		{
 			"label"	"Freeze recorder off (default)"
 			"command"	"ps5_freeze_recorder 0"

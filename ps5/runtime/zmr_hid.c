@@ -788,6 +788,23 @@ void zmr_crumbs_init(const char *dir, void (*out)(const char *))
                     }
                 }
             }
+            /* Sound starts and audio-thread notes from the whole ring
+             * (the last 30), with how many records before the end. */
+            {
+                uint32_t idx[30]; unsigned n = 0;
+                for (uint32_t k = end; k != end - count && n < 30; ) {
+                    --k;
+                    const PCrumb *c = &old.ring[k % PCRUMBS];
+                    if (!strncmp(c->material, "snd ", 4) || !strncmp(c->material, "audio", 5))
+                        idx[n++] = k;
+                }
+                while (n) {
+                    const PCrumb *c = &old.ring[idx[--n] % PCRUMBS];
+                    snprintf(line, sizeof(line), "[crumbs] sound: frame %u (%u records before the end) %s %s\n",
+                             c->frame, end - 1 - idx[n], c->phase, c->material);
+                    out(line);
+                }
+            }
             /* Draws of the unfinished batch, plus the 40 draws before it. */
             uint32_t first = end - count;
             for (uint32_t k = end - count; k != end; ++k) {

@@ -380,6 +380,37 @@ index 9e03c52..02af6ed 100644
  
  	if (!m_devId)
  		SDLAUDIO_FAIL("SDL_OpenAudioDevice()");
+diff --git a/engine/audio/snd_dma.cpp b/engine/audio/snd_dma.cpp
+index 01e73bf..acb7d93 100644
+--- a/engine/audio/snd_dma.cpp
++++ b/engine/audio/snd_dma.cpp
+@@ -5664,6 +5664,9 @@ int S_StartStaticSound( StartSoundParams_t& params )
+ static ConVar snd_filter( "snd_filter", "", FCVAR_CHEAT );
+ #endif // STAGING_ONLY
+ 
++#ifdef PLATFORM_PS5
++extern "C" void zmr_crumb_note( const char *what, unsigned a, unsigned b );
++#endif
+ int S_StartSound( StartSoundParams_t& params )
+ {
+ 
+@@ -5671,6 +5674,16 @@ int S_StartSound( StartSoundParams_t& params )
+ 	{
+ 		return 0;
+ 	}
++#ifdef PLATFORM_PS5
++	{
++		// Freeze recorder: which sound started (the freeze follows a voice line).
++		char name[80];
++		const char *n = params.pSfx->getname();
++		size_t len = n ? strlen( n ) : 0;
++		Q_snprintf( name, sizeof( name ), "snd %s", len > 52 ? n + len - 52 : ( n ? n : "?" ) );
++		zmr_crumb_note( name, params.staticsound ? 1u : 0u, (unsigned)params.soundsource );
++	}
++#endif
+ 
+ #ifdef STAGING_ONLY
+ 	if ( snd_filter.GetString()[ 0 ] && !Q_stristr( params.pSfx->getname(), snd_filter.GetString() ) )
 diff --git a/engine/host.cpp b/engine/host.cpp
 index dbd43c6..df07dcb 100644
 --- a/engine/host.cpp
@@ -752,10 +783,10 @@ index 487633b..ac947f2 100644
  					key = "< not bound >";
 diff --git a/game/client/ps5_commandmenu.inc b/game/client/ps5_commandmenu.inc
 new file mode 100644
-index 0000000..de5836b
+index 0000000..97f9995
 --- /dev/null
 +++ b/game/client/ps5_commandmenu.inc
-@@ -0,0 +1,495 @@
+@@ -0,0 +1,575 @@
 +//========= PS5 port: controller-friendly command menu ==========================
 +//
 +// Opened with Triangle while a menu is up (the PS5 runtime sets a request flag).
@@ -786,7 +817,9 @@ index 0000000..de5836b
 +#include "ienginevgui.h"
 +#include "igamesystem.h"
 +#include "filesystem.h"
++#include "engine/IEngineSound.h"
 +#include "tier0/memdbgon.h"
++extern IEngineSound *enginesound;
 +
 +extern "C" int zmr_take_command_menu_request( void );	// ps5/runtime/zmr_hid.c
 +extern "C" int zmr_osk_open( void );
@@ -827,6 +860,84 @@ index 0000000..de5836b
 +	if ( args.ArgC() > 1 )
 +		ps5_gl_cpu_flip = atoi( args[1] );
 +	Msg( "[ps5] CPU flip %d\n", ps5_gl_cpu_flip );
++}
++// ---- Sound freeze repro --------------------------------------------------
++// ps5_sound_stress [play|load] [count]: walks sound/vo and sound/npc and, one
++// file per step, plays (or only loads) sounds the game hasn't used yet. The
++// freeze follows the first use of a sound, so this reproduces it from the
++// menu. Steps run from a "wait" alias loop: ps5_sound_stress_stop ends it.
++extern "C" void zmr_crumb_note( const char *what, unsigned a, unsigned b );
++static void zmr_crumb_note_cpp( const char *pszSound )
++{
++	char note[80];
++	size_t len = strlen( pszSound );
++	Q_snprintf( note, sizeof( note ), "snd stress %s", len > 50 ? pszSound + len - 50 : pszSound );
++	zmr_crumb_note( note, 0, 0 );
++}
++static CUtlVector<CUtlString> s_PS5StressSounds;
++static int s_nPS5StressNext, s_nPS5StressMode;	// mode 0 = play, 1 = load only
++static void PS5CollectSounds( const char *pszDir, int nMax, int nDepth )
++{
++	if ( s_PS5StressSounds.Count() >= nMax || nDepth > 6 )
++		return;
++	char szWild[MAX_PATH];
++	Q_snprintf( szWild, sizeof( szWild ), "%s/*", pszDir );
++	CUtlVector<CUtlString> subdirs;
++	FileFindHandle_t h;
++	for ( const char *pName = g_pFullFileSystem->FindFirstEx( szWild, "GAME", &h ); pName; pName = g_pFullFileSystem->FindNext( h ) )
++	{
++		if ( pName[0] == '.' )
++			continue;
++		char szFull[MAX_PATH];
++		Q_snprintf( szFull, sizeof( szFull ), "%s/%s", pszDir, pName );
++		if ( g_pFullFileSystem->FindIsDirectory( h ) )
++			subdirs.AddToTail( szFull );
++		else if ( Q_stristr( pName, ".wav" ) && s_PS5StressSounds.Count() < nMax )
++			s_PS5StressSounds.AddToTail( szFull + 6 );	// relative to sound/
++	}
++	g_pFullFileSystem->FindClose( h );
++	for ( int i = 0; i < subdirs.Count(); ++i )
++		PS5CollectSounds( subdirs[i].Get(), nMax, nDepth + 1 );
++}
++CON_COMMAND( ps5_sound_stress, "PS5 freeze test: play (or 'load') sounds not used yet, one per step. Args: [play|load] [count]" )
++{
++	s_nPS5StressMode = ( args.ArgC() > 1 && !Q_stricmp( args[1], "load" ) ) ? 1 : 0;
++	int nMax = args.ArgC() > 2 ? atoi( args[2] ) : 300;
++	s_PS5StressSounds.RemoveAll();
++	s_nPS5StressNext = 0;
++	PS5CollectSounds( "sound/vo", nMax / 2, 0 );
++	PS5CollectSounds( "sound/npc", nMax, 0 );
++	PS5CollectSounds( "sound/ambient", nMax, 0 );
++	Msg( "[ps5] sound stress: %d sounds, %s\n", s_PS5StressSounds.Count(), s_nPS5StressMode ? "load only" : "play" );
++	engine->ClientCmd_Unrestricted( "alias ps5_sound_stress_loop \"ps5_sound_stress_step; wait 15; ps5_sound_stress_loop\"; ps5_sound_stress_loop" );
++}
++CON_COMMAND( ps5_sound_stress_step, "PS5: one step of ps5_sound_stress" )
++{
++	if ( s_nPS5StressNext >= s_PS5StressSounds.Count() )
++	{
++		Msg( "[ps5] sound stress finished (%d sounds)\n", s_nPS5StressNext );
++		engine->ClientCmd_Unrestricted( "alias ps5_sound_stress_loop \"\"" );
++		return;
++	}
++	const char *pszName = s_PS5StressSounds[s_nPS5StressNext++].Get();
++	zmr_crumb_note_cpp( pszName );
++	if ( s_nPS5StressMode == 1 )
++	{
++		enginesound->PrecacheSound( pszName, true );
++		Msg( "[ps5] stress %d/%d load %s\n", s_nPS5StressNext, s_PS5StressSounds.Count(), pszName );
++	}
++	else
++	{
++		char cmd[MAX_PATH + 16];
++		Q_snprintf( cmd, sizeof( cmd ), "play \"%s\"\n", pszName );
++		engine->ClientCmd_Unrestricted( cmd );
++		Msg( "[ps5] stress %d/%d play %s\n", s_nPS5StressNext, s_PS5StressSounds.Count(), pszName );
++	}
++}
++CON_COMMAND( ps5_sound_stress_stop, "PS5: stop ps5_sound_stress" )
++{
++	engine->ClientCmd_Unrestricted( "alias ps5_sound_stress_loop \"\"" );
++	s_nPS5StressNext = s_PS5StressSounds.Count();
 +}
 +extern "C" void zmr_crumbs_enable( int on );
 +CON_COMMAND( ps5_freeze_recorder, "PS5: 1 = record every draw to crumbs.bin so the next launch can report a freeze" )

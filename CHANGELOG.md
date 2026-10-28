@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.1.2-alpha (contentVersion 01.000.046) — 2026-10-28
+
+- **Fixed the freeze when a scripted scene starts** (Barney's checkpoint when
+  Kleiner appears on the monitor, Dr. Kleiner's lab, Combine security cameras
+  and scanners). It happened when a sound was loaded for the first time while
+  the game was running: the filesystem's background I/O thread raced the
+  main thread. Files are now loaded on the main thread (`-noasync` is added
+  to the command line automatically; `-ps5_async` in `args.txt` restores the
+  background thread for testing).
+- The SDL audio thread runs at normal priority, and an audio output that stops
+  blocking is detected and throttled instead of spinning.
+- The freeze recorder also notes sound starts, screen clears, draws, copies
+  and graphics memory activity; a driver failure now returns to the home
+  screen with a `DRIVER STOP` message in the log instead of freezing.
+- Developer tests: sound freeze tests (`ps5_sound_stress`), audio null sink
+  (`-ps5_audio_null`), CPU frame copy/flip and other switches used to find
+  the freeze.
+
 ## v0.1.1-alpha (contentVersion 01.000.041) — 2026-10-27
 
 - Menus can be used with the controller: the left stick moves an on-screen

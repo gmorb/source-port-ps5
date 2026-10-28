@@ -23,6 +23,8 @@ extern "C" void zmr_hid_preload( void );
 extern "C" void zmr_crumb_note( const char *what, unsigned a, unsigned b );
 extern "C" void zmr_crumbs_heartbeat( void );
 extern "C" void zmr_crumbs_enable( int on );
+extern "C" void zmr_audio_keep_realtime( int on );
+extern "C" void zmr_audio_null_sink( int on );
 extern "C" void zmr_crumbs_stall( unsigned long rip_offset, unsigned long frames );
 extern "C" void zmr_crumbs_init( const char *dir, void ( *out )( const char * ) );
 static void KlogOut( const char *s ) { sceKernelDebugOutText( 0, s ); }
@@ -893,6 +895,8 @@ int main( int, char ** )
 	ps5_gltrace_parse( line );
 	g_ps5Probe = strstr( line, "-ps5_probe" ) != NULL;
 	if ( strstr( line, "-ps5_freeze_recorder" ) ) zmr_crumbs_enable( 1 );
+	if ( strstr( line, "-ps5_audio_rt" ) ) zmr_audio_keep_realtime( 1 );
+	if ( strstr( line, "-ps5_audio_null" ) ) zmr_audio_null_sink( 1 );
 	if ( strstr( line, "-ps5_nogpublit" ) ) setenv( "PS5_GPU_BLIT", "0", 1 );
 	if ( const char *q = strstr( line, "-ps5_quit" ) )
 		g_quitMode = q[9] >= '0' && q[9] <= '9' ? q[9] - '0' : 1;
@@ -913,6 +917,12 @@ int main( int, char ** )
 	argv[0] = exe;
 	// HL2's PC client only runs 360controller.cfg once "joystick 1" is already
 	// set, which the PC defaults never do: exec it from the command line.
+	// Background file loading (the filesystem's async I/O thread) froze the
+	// game when a new sound loaded during play (Barney's checkpoint, Kleiner's
+	// lab, Combine cameras). Synchronous loading is the default on PS5;
+	// -ps5_async in args.txt brings the I/O thread back for testing.
+	if ( !strstr( line, "-noasync" ) && !strstr( line, "-ps5_async" ) )
+		strncat( line, " -noasync", sizeof( line ) - strlen( line ) - 1 );
 	if ( !strstr( line, "360controller" ) )
 		strncat( line, " +exec 360controller.cfg", sizeof( line ) - strlen( line ) - 1 );
 	int argc = 1 + SplitArgs( line, argv + 1, 126 );

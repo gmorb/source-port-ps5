@@ -38,7 +38,7 @@ sed -i 's/write_u64(result.data, result.heap_size, std::numeric_limits<std::uint
 grep -q "0x10000000ULL" "$heap_source"
 link_script="$app/tools/build.sh"
 OVERLAY_WRAPS=""
-for f in open fopen freopen stat lstat access mkdir unlink remove rmdir chmod rename realpath opendir readdir closedir chdir getcwd SDL_GL_SwapWindow recvfrom exit _Exit abort pthread_mutex_init pthread_mutex_destroy pthread_cond_init pthread_cond_destroy pthread_mutexattr_init pthread_mutexattr_destroy; do
+for f in open fopen freopen stat lstat access mkdir unlink remove rmdir chmod rename realpath opendir readdir closedir chdir getcwd SDL_GL_SwapWindow recvfrom exit _Exit abort SDL_SetThreadPriority sceAudioOutOutput sceAudioOutOpen pthread_mutex_init pthread_mutex_destroy pthread_cond_init pthread_cond_destroy pthread_mutexattr_init pthread_mutexattr_destroy; do
     OVERLAY_WRAPS+="--wrap=$f "
 done
 if ! grep -q -- "--wrap=malloc" "$link_script"; then
@@ -53,7 +53,7 @@ rm -rf -- "$app/src" "$app/include" "$app/vendor"
 mkdir -p "$app/src" "$app/include" "$app/vendor"
 cp "$gl/native-app/runtime_shims.c" "$app/src/runtime_shims.c"
 cp "$gl/native-app/app_heap.c" "$app/src/app_heap.c"
-cp "$here/runtime/zmr_platform.c" "$here/runtime/zmr_libc_compat.c" "$here/runtime/zmr_fs_overlay.c" "$here/runtime/zmr_memdiag.c" "$here/runtime/zmr_hid.c" "$here/runtime/zmr_commands.c" "$app/src/"
+cp "$here/runtime/zmr_platform.c" "$here/runtime/zmr_libc_compat.c" "$here/runtime/zmr_fs_overlay.c" "$here/runtime/zmr_memdiag.c" "$here/runtime/zmr_hid.c" "$here/runtime/zmr_commands.c" "$here/runtime/zmr_audio.c" "$app/src/"
 
 # Metadata
 if [[ -f $param_src ]]; then
