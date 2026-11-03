@@ -7,7 +7,7 @@ VERSION whenever the list changes: the launcher replaces an older file.
 """
 from pathlib import Path
 
-VERSION = 21
+VERSION = 27
 CHEATS = "sv_cheats 1; "
 
 L = []  # (category, label, command, description)
@@ -262,6 +262,25 @@ add(T, "Clear console", "clear", "Empties the console.")
 
 # ---- Developer tests ---------------------------------------------------------
 X = "Developer tests"
+add(X, "Eye test: no eye reflection", "ps5_eye_debug 1",
+    "Vortigaunt eye test: draw its eyes without the glossy reflection.")
+add(X, "Eye test: no iris depth effect", "ps5_eye_debug 2",
+    "Vortigaunt eye test: iris drawn flat (no parallax depth).")
+add(X, "Eye test: neither", "ps5_eye_debug 3",
+    "Vortigaunt eye test: no reflection and no parallax.")
+add(X, "Eye test: no eye animation", "ps5_eye_debug 4",
+    "Vortigaunt eye test: ignore facial-animation movement on the eye itself.")
+add(X, "Eye test: old GPU eyes", "ps5_eye_debug 6",
+    "Vortigaunt eye test: position the eyes on the GPU like before (eyes face the wrong way).")
+add(X, "Eye test: GPU eyes, no animation", "ps5_eye_debug 7; mat_queue_mode -1",
+    "Vortigaunt eye test: old GPU eyes, but facial-animation movement on the eye is ignored.")
+add(X, "Eye test: CPU eyes", "ps5_eye_debug 5; mat_queue_mode -1",
+    "Vortigaunt eye test: position the eyes on the CPU instead of the GPU.")
+add(X, "Eye test: GPU eyes, single-thread", "ps5_eye_debug 6; mat_queue_mode 0",
+    "Vortigaunt eye test: old GPU eyes with single-thread rendering.")
+add(X, "Eye test: eyes straight ahead", "ps5_eye_debug 0; r_eyemove 0",
+    "Vortigaunt eye test: eyes stop following you and look where the head points.")
+add(X, "Eye test: off (default)", "ps5_eye_debug 0; r_eyemove 1; mat_queue_mode -1", "Normal eyes, normal rendering.")
 add(X, "Sound freeze test: play new sounds", "ps5_freeze_recorder 1; ps5_sound_stress play 300",
     "Plays up to 300 voice/NPC/ambient sounds the game hasn't used yet, one every few frames, to reproduce the freeze from the menu. Recorder on.")
 add(X, "Sound freeze test: load new sounds only", "ps5_freeze_recorder 1; ps5_sound_stress load 300",

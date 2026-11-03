@@ -855,10 +855,10 @@ index 487633b..ac947f2 100644
  					key = "< not bound >";
 diff --git a/game/client/ps5_commandmenu.inc b/game/client/ps5_commandmenu.inc
 new file mode 100644
-index 0000000..97f9995
+index 0000000..81a2600
 --- /dev/null
 +++ b/game/client/ps5_commandmenu.inc
-@@ -0,0 +1,575 @@
+@@ -0,0 +1,577 @@
 +//========= PS5 port: controller-friendly command menu ==========================
 +//
 +// Opened with Triangle while a menu is up (the PS5 runtime sets a request flag).
@@ -1011,6 +1011,8 @@ index 0000000..97f9995
 +	engine->ClientCmd_Unrestricted( "alias ps5_sound_stress_loop \"\"" );
 +	s_nPS5StressNext = s_PS5StressSounds.Count();
 +}
++// Read by materialsystem/stdshaders/eye_refract_helper.cpp (Vortigaunt eyes).
++static ConVar ps5_eye_debug( "ps5_eye_debug", "0", 0, "PS5 eye test: 1 = no cornea reflection, 2 = no iris parallax, 3 = both, 4 = no face animation on eyes, 5 = CPU eyes, 6 = old GPU-skinned eyes, 7 = 6 without face animation" );
 +extern "C" void zmr_crumbs_enable( int on );
 +CON_COMMAND( ps5_freeze_recorder, "PS5: 1 = record every draw to crumbs.bin so the next launch can report a freeze" )
 +{
@@ -1712,7 +1714,7 @@ index 0b27da7..fe9f517 100644
  	/*
  	 * Linux
 diff --git a/materialsystem/cmaterial.cpp b/materialsystem/cmaterial.cpp
-index 12d17df..3a2932a 100644
+index 12d17df..25150fe 100644
 --- a/materialsystem/cmaterial.cpp
 +++ b/materialsystem/cmaterial.cpp
 @@ -3055,6 +3055,10 @@ bool CMaterial::HasProxy( )	const
@@ -1726,7 +1728,7 @@ index 12d17df..3a2932a 100644
  void CMaterial::DrawMesh( VertexCompressionType_t vertexCompression )
  {
  	if ( m_pShader )
-@@ -3070,6 +3074,45 @@ void CMaterial::DrawMesh( VertexCompressionType_t vertexCompression )
+@@ -3070,6 +3074,80 @@ void CMaterial::DrawMesh( VertexCompressionType_t vertexCompression )
  		if ((GetMaterialVarFlags() & MATERIAL_VAR_NO_DRAW) == 0)
  		{
  			const char *pName = m_pShader->GetName();
@@ -1750,22 +1752,57 @@ index 12d17df..3a2932a 100644
 +						printf( "[ps5-material] first draw %s (%s)\n", GetName(), pName ? pName : "?" );
 +						// Describe its textures (size, format, frames): a texture the
 +						// GPU faults on shows up here as the last entry before a hang.
-+						static const char *s_texVars[] = { "$basetexture", "$texture2", "$detail", "$envmap", "$bumpmap", NULL };
-+						for ( int v = 0; s_texVars[v]; ++v )
++						// Every texture parameter (size, format, frames).
++						for ( int v = 0; v < ShaderParamCount(); ++v )
 +						{
-+							bool bFound = false;
-+							IMaterialVar *pVar = FindVar( s_texVars[v], &bFound, false );
-+							if ( !bFound || !pVar || !pVar->IsTexture() )
++							IMaterialVar *pVar = m_pShaderParams[v];
++							if ( !pVar || !pVar->IsTexture() || !pVar->IsDefined() )
 +								continue;
 +							ITexture *pTex = pVar->GetTextureValue();
 +							if ( !pTex )
 +								continue;
-+							printf( "[ps5-material]   %s = %s %dx%d format %d frames %d%s\n", s_texVars[v], pTex->GetName(),
++							printf( "[ps5-material]   %s = %s %dx%d format %d frames %d%s%s\n", pVar->GetName(), pTex->GetName(),
 +								pTex->GetActualWidth(), pTex->GetActualHeight(), (int)pTex->GetImageFormat(),
-+								pTex->GetNumAnimationFrames(), pTex->IsRenderTarget() ? " (render target)" : "" );
++								pTex->GetNumAnimationFrames(), pTex->IsRenderTarget() ? " (render target)" : "",
++								pTex->IsError() ? " (ERROR TEXTURE)" : "" );
 +						}
 +						break;
 +					}
++				}
++			}
++			// Eye shaders: dump their parameters a few times (the iris
++			// projection values are set by studiorender on every draw).
++			if ( pName && Q_stristr( pName, "eye" ) )
++			{
++				static const void *s_eyeMat[64];
++				static int s_eyeDraws[64];
++				int slot = -1;
++				for ( int i = 0; i < 64; ++i )
++				{
++					if ( s_eyeMat[i] == this ) { slot = i; break; }
++					if ( !s_eyeMat[i] ) { s_eyeMat[i] = this; slot = i; break; }
++				}
++				if ( slot >= 0 && ( ++s_eyeDraws[slot] == 30 || s_eyeDraws[slot] == 600 ) )
++				{
++					printf( "[ps5-eye] %s (%s) draw %d:", GetName(), pName, s_eyeDraws[slot] );
++					for ( int v = 0; v < ShaderParamCount(); ++v )
++					{
++						IMaterialVar *pVar = m_pShaderParams[v];
++						if ( !pVar || pVar->IsTexture() || !pVar->IsDefined() )
++							continue;
++						MaterialVarType_t t = pVar->GetType();
++						if ( t == MATERIAL_VAR_TYPE_VECTOR )
++						{
++							const float *f = pVar->GetVecValue();
++							int n = pVar->VectorSize();
++							printf( " %s=[%g %g %g %g]", pVar->GetName(), f[0], n > 1 ? f[1] : 0.0f, n > 2 ? f[2] : 0.0f, n > 3 ? f[3] : 0.0f );
++						}
++						else if ( t == MATERIAL_VAR_TYPE_FLOAT )
++							printf( " %s=%g", pVar->GetName(), pVar->GetFloatValue() );
++						else if ( t == MATERIAL_VAR_TYPE_INT )
++							printf( " %s=%d", pVar->GetName(), pVar->GetIntValue() );
++					}
++					printf( "\n" );
 +				}
 +			}
 +#endif
@@ -1787,6 +1824,61 @@ index e787071..2c46668 100644
  
  	// For this testing release, -2 is equivalent to 0 (off). When we release, we'll make -2 equivalent to -1 (on)
  	if ( iConVarThreadMode == -2 )
+diff --git a/materialsystem/stdshaders/eye_refract_helper.cpp b/materialsystem/stdshaders/eye_refract_helper.cpp
+index b7aa4ca..1ff1f2b 100644
+--- a/materialsystem/stdshaders/eye_refract_helper.cpp
++++ b/materialsystem/stdshaders/eye_refract_helper.cpp
+@@ -319,6 +319,20 @@ void Draw_Eyes_Refract_Internal( CBaseVSShader *pShader, IMaterialVar** params,
+ 		vPSConst[1] = IS_PARAM_DEFINED( info.m_nGlossiness ) ? params[info.m_nGlossiness]->GetFloatValue() : kDefaultGlossiness;
+ 		vPSConst[2] = fAverageAmbient;
+ 		vPSConst[3] = IS_PARAM_DEFINED( info.m_nCorneaBumpStrength ) ? params[info.m_nCorneaBumpStrength]->GetFloatValue() : kDefaultCorneaBumpStrength;
++#ifdef PLATFORM_PS5
++		// Vortigaunt eye investigation (ps5_eye_debug, client convar):
++		// 1 = no cornea reflection, 2 = no iris parallax, 3 = both.
++		static ConVarRef s_ps5EyeDebug( "ps5_eye_debug" );
++		const int nPS5EyeDebug = s_ps5EyeDebug.IsValid() ? s_ps5EyeDebug.GetInt() : 0;
++		if ( nPS5EyeDebug == 1 || nPS5EyeDebug == 3 )
++			vPSConst[1] = 0.0f;
++		// 4 = ignore flex (facial animation) deltas on the eye mesh.
++		if ( nPS5EyeDebug == 4 || nPS5EyeDebug == 7 )
++		{
++			float vNoFlex[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
++			pShaderAPI->SetVertexShaderConstant( VERTEX_SHADER_FLEXSCALE, vNoFlex, 1 );
++		}
++#endif
+ 		pShaderAPI->SetPixelShaderConstant( 0, vPSConst, 1 );
+ 
+ 		pShaderAPI->SetPixelShaderConstant( 1, IS_PARAM_DEFINED( info.m_nEyeOrigin ) ? params[info.m_nEyeOrigin]->GetVecValue() : kDefaultEyeOrigin, 1 );
+@@ -328,6 +342,18 @@ void Draw_Eyes_Refract_Internal( CBaseVSShader *pShader, IMaterialVar** params,
+ 		float vEyePos[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+ 		pShaderAPI->GetWorldSpaceCameraPosition( vEyePos );
+ 		pShaderAPI->SetPixelShaderConstant( 4, vEyePos, 1 );
++#ifdef PLATFORM_PS5
++		{
++			static int s_nPS5EyeLog;
++			if ( ( ++s_nPS5EyeLog % 900 ) == 30 )
++			{
++				const float *o = IS_PARAM_DEFINED( info.m_nEyeOrigin ) ? params[info.m_nEyeOrigin]->GetVecValue() : kDefaultEyeOrigin;
++				printf( "[ps5-eye] refract: camera %.1f %.1f %.1f eye %.1f %.1f %.1f ambient %.3f lights %d gloss %.2f debug %d\n",
++					vEyePos[0], vEyePos[1], vEyePos[2], o[0], o[1], o[2], fAverageAmbient,
++					lightState.m_nNumLights, vPSConst[1], nPS5EyeDebug );
++			}
++		}
++#endif
+ 		pShaderAPI->SetPixelShaderConstant( 5, IS_PARAM_DEFINED( info.m_nAmbientOcclColor ) ? params[info.m_nAmbientOcclColor]->GetVecValue() : kDefaultAmbientOcclColor, 1 );
+ 
+ 		float vPackedConst6[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+@@ -335,6 +361,10 @@ void Draw_Eyes_Refract_Internal( CBaseVSShader *pShader, IMaterialVar** params,
+ 		vPackedConst6[1] = IS_PARAM_DEFINED( info.m_nEyeballRadius ) ? params[info.m_nEyeballRadius]->GetFloatValue() : kDefaultEyeballRadius;
+ 		//vPackedConst6[2] = IS_PARAM_DEFINED( info.m_nRaytraceSphere ) ? params[info.m_nRaytraceSphere]->GetFloatValue() : kDefaultRaytraceSphere;
+ 		vPackedConst6[3] = IS_PARAM_DEFINED( info.m_nParallaxStrength ) ? params[info.m_nParallaxStrength]->GetFloatValue() : kDefaultParallaxStrength;
++#ifdef PLATFORM_PS5
++		if ( nPS5EyeDebug == 2 || nPS5EyeDebug == 3 )
++			vPackedConst6[3] = 0.0f;
++#endif
+ 		pShaderAPI->SetPixelShaderConstant( 6, vPackedConst6, 1 );
+ 
+ 		float fPixelFogType = pShaderAPI->GetPixelFogCombo() == 1 ? 1 : 0;
 diff --git a/public/filesystem_init.cpp b/public/filesystem_init.cpp
 index d309efc..ea66dfb 100644
 --- a/public/filesystem_init.cpp
@@ -1829,6 +1921,194 @@ index a81ca03..0260cc0 100644
  	DrawRangeElementsNonInline( mode, start, end, count, type, indices, baseVertex, pIndexBuf );
  #else
  
+diff --git a/studiorender/r_studiodraw.cpp b/studiorender/r_studiodraw.cpp
+index c2aee1f..89dee6c 100644
+--- a/studiorender/r_studiodraw.cpp
++++ b/studiorender/r_studiodraw.cpp
+@@ -19,6 +19,7 @@
+ #include "studiorendercontext.h"
+ #include "tier2/tier2.h"
+ #include "tier0/vprof.h"
++#include "tier1/convar.h"
+ 
+ //#define PROFILE_STUDIO VPROF
+ #define PROFILE_STUDIO
+@@ -2140,6 +2141,15 @@ template<VertexCompressionType_t T> void CStudioRender::R_StudioRestoreMesh( mst
+ //-----------------------------------------------------------------------------
+ // Draws a mesh using hardware + software skinning
+ //-----------------------------------------------------------------------------
++#ifdef PLATFORM_PS5
++// Eyeballs on PS5: drawn rigidly with their bone loaded as the model matrix
++// (no per-vertex bone weights/indices). With the GPU skinning path the
++// Vortigaunt's eyes came out facing the wrong way: the eye vertex shader's
++// skinned variant reads the bone weight/index attributes wrongly here, while
++// the same data drawn rigidly is correct. Eyeball strips always use a single
++// bone, so this is exact. ps5_eye_debug 6/7 bring the old path back.
++static int s_ps5EyeRigid;
++#endif
+ int CStudioRender::R_StudioDrawGroupHWSkin( IMatRenderContext *pRenderContext, studiomeshgroup_t* pGroup, IMesh* pMesh, ColorMeshInfo_t * pColorMeshInfo )
+ {
+ 	PROFILE_STUDIO("HwSkin");
+@@ -2171,6 +2181,15 @@ int CStudioRender::R_StudioDrawGroupHWSkin( IMatRenderContext *pRenderContext, s
+ 	{
+ 		OptimizedModel::StripHeader_t* pStrip = &pGroup->m_pStripData[j];
+ 
++#ifdef PLATFORM_PS5
++		if ( s_ps5EyeRigid && pStrip->numBones <= 1 && pStrip->numBoneStateChanges == 1 && pStrip->pBoneStateChange( 0 )->newBoneID >= 0 )
++		{
++			pRenderContext->MatrixMode( MATERIAL_MODEL );
++			pRenderContext->LoadMatrix( m_PoseToWorld[ pStrip->pBoneStateChange( 0 )->newBoneID ] );
++			pRenderContext->SetNumBoneWeights( 0 );
++		}
++		else
++#endif
+ 		if ( m_pStudioHdr->numbones > 1 )
+ 		{
+ 			// Reset bone state if we're hardware skinning
+@@ -2593,9 +2612,64 @@ int CStudioRender::R_StudioDrawEyeball( IMatRenderContext *pRenderContext, mstud
+ 
+ 	// Take the static path for new flexed models on DX9 hardware
+ 	bool bFlexStatic = bIsDeltaFlexed && g_pMaterialSystemHardwareConfig->SupportsStreamOffset();
+-	bool bShouldHardwareSkin = bIsHardwareSkinnedData && ( !bIsFlexed || bFlexStatic ) && 
++	bool bShouldHardwareSkin = bIsHardwareSkinnedData && ( !bIsFlexed || bFlexStatic ) &&
+ 		( lighting != LIGHTING_SOFTWARE ) && ( !m_pRC->m_Config.bSoftwareSkin );
+ 
++#ifdef PLATFORM_PS5
++	// Vortigaunt eye investigation. ps5_eye_debug 5 = draw eyeballs with CPU
++	// skinning/flex instead of the GPU path. A log line every 600 eyeball draws
++	// compares where the eye mesh really is (CPU skinned, unflexed) with the
++	// sphere the shader traces against (eye origin + radius).
++	{
++		static ConVarRef s_ps5EyeDebug( "ps5_eye_debug" );
++		const int nEyeDbg = s_ps5EyeDebug.IsValid() ? s_ps5EyeDebug.GetInt() : 0;
++		// The GPU-skinned path draws Vortigaunt eyes facing the wrong way on
++		// PS5 (the CPU path is right), so eyeballs are skinned on the CPU.
++		// They're a few dozen vertices each. 6 = old GPU path, for testing.
++		// 5 = CPU-skinned eyes, 6 = old GPU-skinned eyes, 7 = 6 without flex.
++		// Default (and 8): GPU, but drawn rigidly with the eye's bone (see s_ps5EyeRigid).
++		if ( nEyeDbg == 5 )
++			bShouldHardwareSkin = false;
++
++		static int s_nEyeGeoLog;
++		if ( ( s_nEyeGeoLog++ % 600 ) < 6 && pmesh->numvertices > 0 )
++		{
++			const mstudioeyeball_t *pe = m_pSubModel->pEyeball( pmesh->materialparam );
++			const eyeballstate_t &st = m_pEyeballState[ pmesh->materialparam ];
++			Vector eo;
++			VectorTransform( pe->org, m_pBoneToWorld[ pe->bone ], eo );
++			Vector sum( 0, 0, 0 );
++			float dmin = 1e9f, dmax = 0.0f, dsum = 0.0f;
++			for ( int v = 0; v < pmesh->numvertices; ++v )
++			{
++				mstudiovertex_t &vert = pVertices[ v ];
++				Vector w;
++				R_StudioTransform( vert.m_vecPosition, &vert.m_BoneWeights, w );
++				sum += w;
++				float d = ( w - eo ).Length();
++				dmin = MIN( dmin, d ); dmax = MAX( dmax, d ); dsum += d;
++			}
++			Vector c = sum / (float)pmesh->numvertices;
++			Vector cap = c - eo;
++			float capLen = VectorNormalize( cap );
++			Vector boneFwd, boneUp;
++			VectorRotate( pe->forward, m_pBoneToWorld[ pe->bone ], boneFwd );
++			VectorRotate( pe->up, m_pBoneToWorld[ pe->bone ], boneUp );
++			Vector toCam = m_pRC->m_ViewOrigin - eo;
++			VectorNormalize( toCam );
++			printf( "[ps5-eye] geo %s: verts %d bone %d w0 %d nb %d flags%s%s%s hw %d dbg %d | org %.2f %.2f %.2f r %.2f | mesh dist %.2f..%.2f avg %.2f | cap %.2f dir %.2f %.2f %.2f | cap.fwd %.2f cap.cam %.2f cap.up %.2f | look.cam %.2f bonefwd.cam %.2f bonefwd.cap %.2f boneup.cap %.2f\n",
++				pMaterial ? pMaterial->GetName() : "?", pmesh->numvertices, pe->bone,
++				(int)pVertices[0].m_BoneWeights.bone[0], (int)pVertices[0].m_BoneWeights.numbones,
++				bIsFlexed ? " flexed" : "", bIsDeltaFlexed ? " delta" : "", bIsHardwareSkinnedData ? " hwskin" : "",
++				(int)bShouldHardwareSkin, nEyeDbg,
++				eo.x, eo.y, eo.z, pe->radius, dmin, dmax, dsum / pmesh->numvertices,
++				capLen, cap.x, cap.y, cap.z,
++				DotProduct( cap, st.forward ), DotProduct( cap, toCam ), DotProduct( cap, st.up ),
++				DotProduct( st.forward, toCam ), DotProduct( boneFwd, toCam ), DotProduct( boneFwd, cap ), DotProduct( boneUp, cap ) );
++		}
++	}
++#endif
++
+ 	pRenderContext->MatrixMode( MATERIAL_MODEL );
+ 	pRenderContext->LoadIdentity();
+ 
+@@ -2628,11 +2702,45 @@ int CStudioRender::R_StudioDrawEyeball( IMatRenderContext *pRenderContext, mstud
+ 
+ 	if ( bShouldHardwareSkin )
+ 	{
++#ifdef PLATFORM_PS5
++		static int s_nEyeHwLog;
++		if ( ( s_nEyeHwLog++ % 600 ) < 6 )
++		{
++			const mstudioeyeball_t *pe = m_pSubModel->pEyeball( pmesh->materialparam );
++			for ( j = 0; j < pMeshData->m_NumGroup; ++j )
++			{
++				studiomeshgroup_t* pG = &pMeshData->m_pMeshGroup[j];
++				printf( "[ps5-eye] gpu %s: group %d flags %#x strips %d studio bones %d eye bone %d\n",
++					pMaterial ? pMaterial->GetName() : "?", j, pG->m_Flags, pG->m_NumStrips, m_pStudioHdr->numbones, pe->bone );
++				for ( int k = 0; k < pG->m_NumStrips; ++k )
++				{
++					OptimizedModel::StripHeader_t *pS = &pG->m_pStripData[k];
++					printf( "[ps5-eye]   strip %d: idx %d+%d bones %d flags %#x changes", k, pS->indexOffset, pS->numIndices, pS->numBones, pS->flags );
++					for ( int c = 0; c < pS->numBoneStateChanges; ++c )
++						printf( " %d->%d", pS->pBoneStateChange( c )->hardwareID, pS->pBoneStateChange( c )->newBoneID );
++					printf( "\n" );
++				}
++			}
++			const matrix3x4_t &m = m_PoseToWorld[ pe->bone ];
++			printf( "[ps5-eye]   pose->world[%d] %.3f %.3f %.3f %.1f / %.3f %.3f %.3f %.1f / %.3f %.3f %.3f %.1f\n", pe->bone,
++				m[0][0], m[0][1], m[0][2], m[0][3], m[1][0], m[1][1], m[1][2], m[1][3], m[2][0], m[2][1], m[2][2], m[2][3] );
++		}
++#endif
++#ifdef PLATFORM_PS5
++		{
++			static ConVarRef s_ps5EyeDebug2( "ps5_eye_debug" );
++			const int nDbg = s_ps5EyeDebug2.IsValid() ? s_ps5EyeDebug2.GetInt() : 0;
++			s_ps5EyeRigid = ( nDbg != 6 && nDbg != 7 );
++		}
++#endif
+ 		for ( j = 0; j < pMeshData->m_NumGroup; ++j )
+ 		{
+ 			studiomeshgroup_t* pGroup = &pMeshData->m_pMeshGroup[j];
+ 			numTrianglesRendered += R_StudioDrawStaticMesh( pRenderContext, pmesh, pGroup, lighting, m_pRC->m_AlphaMod, pMaterial, lod, NULL );
+ 		}
++#ifdef PLATFORM_PS5
++		s_ps5EyeRigid = 0;
++#endif
+ 
+ 		return numTrianglesRendered;
+ 	}
+diff --git a/studiorender/studiorendercontext.cpp b/studiorender/studiorendercontext.cpp
+index 123c8a5..9dc3afd 100644
+--- a/studiorender/studiorendercontext.cpp
++++ b/studiorender/studiorendercontext.cpp
+@@ -756,6 +756,27 @@ void CStudioRenderContext::R_StudioBuildMeshGroup( const char *pModelName, bool
+ 		}
+ 	}
+ 
++#ifdef PLATFORM_PS5
++	// Eye investigation: what goes into the GPU vertex buffer of eyeball meshes.
++	if ( pMesh->materialtype == 1 && hwSkin && V_stristr( pModelName, "vort" ) )
++	{
++		const mstudio_meshvertexdata_t *vd = GetFatVertexData( pMesh, pStudioHdr );
++		printf( "[ps5-eye] build %s mesh mat %d eyeball %d: fmt %#llx compressed %d verts %d indices %d boneweights %d\n",
++			pModelName, pMesh->material, pMesh->materialparam, (unsigned long long)vertexFormat, (int)compressionType,
++			pStripGroup->numVerts, pStripGroup->numIndices, NumBoneWeights( vertexFormat ) );
++		for ( int v = 0; v < pStripGroup->numVerts && v < 4 && vd; ++v )
++		{
++			OptimizedModel::Vertex_t *pv = pStripGroup->pVertex( v );
++			const mstudiovertex_t *mv = vd->Vertex( pv->origMeshVertID );
++			printf( "[ps5-eye]   v%d orig %d pos %.2f %.2f %.2f vtx bones %d ids %d %d %d wi %d %d %d | studio nb %d b %d %d %d w %.2f %.2f %.2f\n",
++				v, pv->origMeshVertID, mv->m_vecPosition.x, mv->m_vecPosition.y, mv->m_vecPosition.z,
++				pv->numBones, pv->boneID[0], pv->boneID[1], pv->boneID[2], pv->boneWeightIndex[0], pv->boneWeightIndex[1], pv->boneWeightIndex[2],
++				mv->m_BoneWeights.numbones, mv->m_BoneWeights.bone[0], mv->m_BoneWeights.bone[1], mv->m_BoneWeights.bone[2],
++				mv->m_BoneWeights.weight[0], mv->m_BoneWeights.weight[1], mv->m_BoneWeights.weight[2] );
++		}
++	}
++#endif
++
+ 	if ( bBadBoneWeights )
+ 	{
+ 		mstudiomodel_t* pModel = pMesh->pModel();
 diff --git a/tier1/interface.cpp b/tier1/interface.cpp
 index 47fda8f..9836f55 100644
 --- a/tier1/interface.cpp
@@ -1845,6 +2125,32 @@ index 47fda8f..9836f55 100644
  	// If using the Steam filesystem, either the DLL must be a minimum footprint
  	// file in the depot (MFP) or a filesystem GetLocalCopy() call must be made
  	// prior to the call to this routine.
+diff --git a/togl/linuxwin/cglmprogram.cpp b/togl/linuxwin/cglmprogram.cpp
+index 0010911..f0a4e5d 100644
+--- a/togl/linuxwin/cglmprogram.cpp
++++ b/togl/linuxwin/cglmprogram.cpp
+@@ -462,6 +462,21 @@ void	CGLMProgram::Compile( EGLMProgramLang lang )
+ 				}
+ 			#endif
+ 
++#ifdef PLATFORM_PS5
++			// Dump the translated GLSL of shaders named by -ps5_dumpshader
++			// "<fragment>[,<fragment>]" (e.g. eye_refract) to the log.
++			{
++				static const char *s_dump = (const char *)-1;
++				if ( s_dump == (const char *)-1 )
++					s_dump = CommandLine()->ParmValue( "-ps5_dumpshader", (const char *)NULL );
++				if ( s_dump && m_shaderName[0] && V_stristr( m_shaderName, s_dump ) )
++				{
++					printf( "[ps5-glsl] ---- %s (%s) ----\n", m_shaderName, m_type == kGLMVertexProgram ? "vertex" : "fragment" );
++					fwrite( section, 1, glslDesc->m_textLength, stdout );
++					printf( "\n[ps5-glsl] ---- end %s ----\n", m_shaderName );
++				}
++			}
++#endif
+ 			gGL->glShaderSourceARB( glslDesc->m_object.glsl, 1, (const GLchar **)&section, &glslDesc->m_textLength);	
+ 
+ #if GLM_FREE_SHADER_TEXT
 diff --git a/togl/linuxwin/glentrypoints.cpp b/togl/linuxwin/glentrypoints.cpp
 index 621ab39..a231fb6 100644
 --- a/togl/linuxwin/glentrypoints.cpp
@@ -1925,16 +2231,35 @@ index 745862b..b74e59f 100644
  #if GLMDEBUG
  		if ( m_slowCheckEnable )
 diff --git a/togl/linuxwin/glmgr_flush.inl b/togl/linuxwin/glmgr_flush.inl
-index 7532594..1ef8f03 100644
+index 7532594..1bc4c70 100644
 --- a/togl/linuxwin/glmgr_flush.inl
 +++ b/togl/linuxwin/glmgr_flush.inl
-@@ -513,11 +513,37 @@ FORCEINLINE void GLMContext::FlushDrawStates( uint nStartIndex, uint nEndIndex,
+@@ -513,11 +513,56 @@ FORCEINLINE void GLMContext::FlushDrawStates( uint nStartIndex, uint nEndIndex,
  		IDirect3DVertexDeclaration9	*pVertDecl = m_pDevice->m_pVertDecl;
  		const uint8	*pVertexAttribDescToStreamIndex = pVertDecl->m_VertexAttribDescToStreamIndex;
  
 +#ifdef PLATFORM_PS5
 +		static int s_ps5AttrLogs = 0;
-+		const bool bPS5Log = s_ps5AttrLogs < 40;
++		static int s_ps5EyeAttrLogs = 0;
++		// GPU-skinned eyeball draws (ps5_eye_debug 6): eye_refract with the bone array.
++		const bool bPS5EyeLog = s_ps5EyeAttrLogs < 16 && strstr( m_drawingProgram[ kGLMVertexProgram ]->m_shaderName, "eye_refract" ) &&
++			m_drawingProgram[ kGLMVertexProgram ]->m_descs[kGLMGLSL].m_VSHighWaterBone > 3;
++		if ( bPS5EyeLog )
++		{
++			++s_ps5EyeAttrLogs;
++			printf( "[toglattr] eye draw: vs %s, streams", m_drawingProgram[ kGLMVertexProgram ]->m_shaderName );
++			for ( int st = 0; st < 4; ++st )
++				printf( " %d:(buf %p off %d stride %d%s)", st, m_pDevice->m_vtx_buffers[st], (int)m_pDevice->m_streams[st].m_offset,
++					(int)m_pDevice->m_streams[st].m_stride, m_pDevice->m_vtx_buffers[st] == m_pDevice->m_pDummy_vtx_buffer ? " dummy" : "" );
++			printf( "\n" );
++			const float (*cv)[4] = m_programParamsF[kGLMVertexProgram].m_values;
++			const int b = DXABSTRACT_VS_FIRST_BONE_SLOT;
++			printf( "[toglattr]   bone0 %.3f %.3f %.3f %.1f / %.3f %.3f %.3f %.1f / %.3f %.3f %.3f %.1f | c3 %.2f %.2f | c48 %.1f %.1f %.1f | hint %d hwbone %d\n",
++				cv[b][0], cv[b][1], cv[b][2], cv[b][3], cv[b+1][0], cv[b+1][1], cv[b+1][2], cv[b+1][3], cv[b+2][0], cv[b+2][1], cv[b+2][2], cv[b+2][3],
++				cv[3][0], cv[3][1], cv[48][0], cv[48][1], cv[48][2],
++				(int)m_nMaxUsedVertexProgramConstantsHint, (int)m_drawingProgram[kGLMVertexProgram]->m_descs[kGLMGLSL].m_VSHighWaterBone );
++		}
++		const bool bPS5Log = s_ps5AttrLogs < 40 || bPS5EyeLog;
 +		if ( bPS5Log )
 +		{
 +			++s_ps5AttrLogs;

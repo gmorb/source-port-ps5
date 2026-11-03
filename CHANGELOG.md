@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.1.4-alpha (contentVersion 01.000.062) — 2026-11-02
+
+- **Fixed the Vortigaunt's eyes facing the wrong way** (the Vortigaunt in the
+  canals; the eye looked white or black and only seemed right from below).
+  The game aimed the eyes correctly, but the graphics chip misread the eye's
+  per-vertex bone data in the skinned variant of the eye shader, turning the
+  eye mesh. Eyeballs always follow a single bone, so they're now drawn
+  rigidly with that bone on the GPU, which is exact and slightly cheaper.
+- **Quitting no longer hangs on screen** when a kernel-log capture is
+  running: copying a large unsent log backlog to the kernel log at exit is
+  capped at 2 seconds (the log file itself is always complete).
+- Developer tests: new eye tests (`ps5_eye_debug` 1–7, `r_eyemove`), eye
+  diagnostics in the log, and `-ps5_dumpshader <name>` prints a shader's
+  translated GLSL.
+
 ## v0.1.3-alpha (contentVersion 01.000.050) — 2026-10-28
 
 - **Root cause of the scripted-scene freeze found and fixed.** When a scene

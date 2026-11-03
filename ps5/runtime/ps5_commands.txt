@@ -1,4 +1,4 @@
-// ps5-commands-version 21
+// ps5-commands-version 27
 // Triangle command menu (PS5 port). Generated: replaced when the app updates.
 // Add your own commands to ps5_commands_custom.txt instead.
 "Commands"
@@ -1378,29 +1378,89 @@
 		}
 		"38"
 		{
+			"label"	"Eye test: no eye reflection"
+			"command"	"ps5_eye_debug 1"
+			"description"	"Vortigaunt eye test: draw its eyes without the glossy reflection."
+		}
+		"39"
+		{
+			"label"	"Eye test: no iris depth effect"
+			"command"	"ps5_eye_debug 2"
+			"description"	"Vortigaunt eye test: iris drawn flat (no parallax depth)."
+		}
+		"40"
+		{
+			"label"	"Eye test: neither"
+			"command"	"ps5_eye_debug 3"
+			"description"	"Vortigaunt eye test: no reflection and no parallax."
+		}
+		"41"
+		{
+			"label"	"Eye test: no eye animation"
+			"command"	"ps5_eye_debug 4"
+			"description"	"Vortigaunt eye test: ignore facial-animation movement on the eye itself."
+		}
+		"42"
+		{
+			"label"	"Eye test: old GPU eyes"
+			"command"	"ps5_eye_debug 6"
+			"description"	"Vortigaunt eye test: position the eyes on the GPU like before (eyes face the wrong way)."
+		}
+		"43"
+		{
+			"label"	"Eye test: GPU eyes, no animation"
+			"command"	"ps5_eye_debug 7; mat_queue_mode -1"
+			"description"	"Vortigaunt eye test: old GPU eyes, but facial-animation movement on the eye is ignored."
+		}
+		"44"
+		{
+			"label"	"Eye test: CPU eyes"
+			"command"	"ps5_eye_debug 5; mat_queue_mode -1"
+			"description"	"Vortigaunt eye test: position the eyes on the CPU instead of the GPU."
+		}
+		"45"
+		{
+			"label"	"Eye test: GPU eyes, single-thread"
+			"command"	"ps5_eye_debug 6; mat_queue_mode 0"
+			"description"	"Vortigaunt eye test: old GPU eyes with single-thread rendering."
+		}
+		"46"
+		{
+			"label"	"Eye test: eyes straight ahead"
+			"command"	"ps5_eye_debug 0; r_eyemove 0"
+			"description"	"Vortigaunt eye test: eyes stop following you and look where the head points."
+		}
+		"47"
+		{
+			"label"	"Eye test: off (default)"
+			"command"	"ps5_eye_debug 0; r_eyemove 1; mat_queue_mode -1"
+			"description"	"Normal eyes, normal rendering."
+		}
+		"48"
+		{
 			"label"	"Sound freeze test: play new sounds"
 			"command"	"ps5_freeze_recorder 1; ps5_sound_stress play 300"
 			"description"	"Plays up to 300 voice/NPC/ambient sounds the game hasn't used yet, one every few frames, to reproduce the freeze from the menu. Recorder on."
 		}
-		"39"
+		"49"
 		{
 			"label"	"Sound freeze test: load new sounds only"
 			"command"	"ps5_freeze_recorder 1; ps5_sound_stress load 300"
 			"description"	"Same, but only loads each sound without playing it (tells loading apart from playing)."
 		}
-		"40"
+		"50"
 		{
 			"label"	"Sound freeze test: stop"
 			"command"	"ps5_sound_stress_stop"
 			"description"	"Stop the sound freeze test."
 		}
-		"41"
+		"51"
 		{
 			"label"	"Freeze recorder on"
 			"command"	"ps5_freeze_recorder 1"
 			"description"	"Record every draw to crumbs.bin so the next launch can report a freeze (costs some fps). Also: -ps5_freeze_recorder in args.txt."
 		}
-		"42"
+		"52"
 		{
 			"label"	"Freeze recorder off (default)"
 			"command"	"ps5_freeze_recorder 0"

@@ -53,6 +53,18 @@ static pthread_mutex_t g_klogLock = PTHREAD_MUTEX_INITIALIZER;
 static const char *g_klogFiles[] = { "zmr.log", "hl2/console.log" };
 static int g_klogFds[2] = { -1, -1 };
 
+// When non-zero, DrainLogToKlog stops copying to the kernel log at this time
+// (CLOCK_MONOTONIC, microseconds) and skips the rest. Used when quitting: a
+// large unsent backlog (big debug dumps) took 15+ s to push out, which held
+// the app on screen after "Quit". The log file itself is complete either way.
+static unsigned long long g_klogDeadlineUs;
+static unsigned long long KlogNowUs()
+{
+	struct timespec ts;
+	clock_gettime( CLOCK_MONOTONIC, &ts );
+	return (unsigned long long)ts.tv_sec * 1000000ull + (unsigned long long)ts.tv_nsec / 1000ull;
+}
+
 static void DrainLogToKlog()
 {
 	pthread_mutex_lock( &g_klogLock );
@@ -77,6 +89,16 @@ static void DrainLogToKlog()
 			ssize_t n;
 			while ( ( n = read( g_klogFds[i], buf, sizeof( buf ) - 1 ) ) > 0 )
 			{
+				if ( g_klogDeadlineUs && KlogNowUs() > g_klogDeadlineUs )
+				{
+					off_t here = lseek( g_klogFds[i], 0, SEEK_CUR );
+					off_t end = lseek( g_klogFds[i], 0, SEEK_END );
+					char note[160];
+					snprintf( note, sizeof( note ), "\n[zmr] quit: skipped %lld bytes of %s here (still in the log file)\n",
+						(long long)( end - here + n ), g_klogFiles[i] );
+					sceKernelDebugOutText( 0, note );
+					break;
+				}
 				buf[n] = 0;
 				if ( i == 1 )
 					sceKernelDebugOutText( 0, "[con] " );
@@ -1031,6 +1053,8 @@ extern "C" void __wrap_exit( int status )
 {
 	printf( "[zmr] exit(%d): leaving without running destructors (quit mode %d)\n", status, g_quitMode );
 	fflush( NULL );
+	if ( status == 0 )
+		g_klogDeadlineUs = KlogNowUs() + 2000000ull;	// normal quit: 2 s at most
 	DrainLogToKlog();
 	switch ( g_quitMode )
 	{
